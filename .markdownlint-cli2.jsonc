@@ -5,7 +5,11 @@
     // Limit linting to the repository Markdown content we care about.
     "globs": [
         "README.md",
-        "features/**/*.md"
+        "agents/**/*.md",
+        "instructions/**/*.md",
+        "prompts/**/*.md",
+        "resources/**/*.md",
+        "skills/**/*.md"
     ],
 
     // Rule configuration for markdownlint.

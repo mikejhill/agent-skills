@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script>/* Theme pre-paint: apply a saved Light/Dark choice before render (Auto = no attribute). Full logic in helpers below. */
+(function(){try{var m=localStorage.getItem('report-theme');if(m==='light'||m==='dark')document.documentElement.setAttribute('data-theme',m)}catch(e){}})();</script>
+<title>{{TITLE}}</title>
+<meta name="description" content="{{ONE_LINE_SUMMARY}}">
+<!--
+  html-report skill · base template
+  - Single file. No external requests. Replace every {{PLACEHOLDER}}; delete unused sections.
+  - Components: see references/components.md. Helpers at bottom are driven by data-* attributes.
+  - Libraries: keep only the placeholders you use; scripts/build_report.py inlines them into the output file.
+-->
+<style>
+/* ───────────── Tokens ───────────── */
+:root{
+  --bg:#f7f7f8; --surface:#fff; --surface-2:#f0f1f3; --border:#e2e4e8;
+  --text:#14161a; --muted:#5b6270;
+  --accent:#3b5bdb; --accent-soft:rgba(59,91,219,.12);
+  --ok:#2b8a3e; --ok-soft:rgba(43,138,62,.12);
+  --warn:#b35c00; --warn-soft:rgba(179,92,0,.12);
+  --bad:#c92a2a; --bad-soft:rgba(201,42,42,.11);
+  --info:#1971c2; --info-soft:rgba(25,113,194,.12);
+  --c1:#4263eb; --c2:#e8590c; --c3:#0ca678; --c4:#ae3ec9; --c5:#f59f00; --c6:#1098ad;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --r:10px; --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0d0f12; --surface:#161a1f; --surface-2:#1e232a; --border:#2a3038;
+  --text:#e8eaed; --muted:#9aa3af;
+  --accent:#7c94ff; --accent-soft:rgba(124,148,255,.18);
+  --ok:#51cf66; --ok-soft:rgba(81,207,102,.15);
+  --warn:#fcc419; --warn-soft:rgba(252,196,25,.14);
+  --bad:#ff6b6b; --bad-soft:rgba(255,107,107,.15);
+  --info:#4dabf7; --info-soft:rgba(77,171,247,.15);
+  --c1:#748ffc; --c2:#ff922b; --c3:#38d9a9; --c4:#da77f2; --c5:#ffd43b; --c6:#3bc9db;
+  --shadow:none; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0d0f12; --surface:#161a1f; --surface-2:#1e232a; --border:#2a3038;
+  --text:#e8eaed; --muted:#9aa3af;
+  --accent:#7c94ff; --accent-soft:rgba(124,148,255,.18);
+  --ok:#51cf66; --ok-soft:rgba(81,207,102,.15);
+  --warn:#fcc419; --warn-soft:rgba(252,196,25,.14);
+  --bad:#ff6b6b; --bad-soft:rgba(255,107,107,.15);
+  --info:#4dabf7; --info-soft:rgba(77,171,247,.15);
+  --c1:#748ffc; --c2:#ff922b; --c3:#38d9a9; --c4:#da77f2; --c5:#ffd43b; --c6:#3bc9db;
+  --shadow:none; color-scheme:dark;
+}
+
+/* ───────────── Base ───────────── */
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth;scroll-padding-top:64px}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{line-height:1.2;margin:0 0 var(--s3);font-weight:650}
+h1{font-size:clamp(1.7rem,4vw,2.3rem);letter-spacing:-.02em}
+h2{font-size:1.5rem;letter-spacing:-.01em}
+h3{font-size:1.15rem}
+p{margin:0 0 var(--s3);max-width:75ch}
+a{color:var(--accent);text-underline-offset:2px}
+code,pre,kbd{font-family:var(--mono);font-size:.88em}
+code{background:var(--surface-2);padding:.1em .35em;border-radius:4px}
+pre{background:var(--surface-2);padding:var(--s4);border-radius:8px;overflow:auto;line-height:1.45;margin:0}
+pre code{background:none;padding:0}
+small,.muted{color:var(--muted)}
+.meta{font-size:.82rem;color:var(--muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+@media(min-width:720px){.wrap{padding:0 24px}}
+.num{font-variant-numeric:tabular-nums}
+
+/* ───────────── Top bar ───────────── */
+.topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.topbar .wrap{display:flex;align-items:center;gap:var(--s4);height:52px}
+.topbar .brand{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}
+.topbar nav{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;flex:1}
+.topbar nav::-webkit-scrollbar{display:none}
+.topbar nav a{color:var(--muted);text-decoration:none;font-size:.88rem;padding:6px 10px;border-radius:6px;white-space:nowrap}
+.topbar nav a:hover,.topbar nav a.active{color:var(--text);background:var(--surface-2)}
+.icon-btn{background:none;border:1px solid var(--border);color:var(--text);border-radius:6px;height:32px;min-width:32px;cursor:pointer;font:inherit;font-size:.9rem}
+.icon-btn:hover{background:var(--surface-2)}
+
+/* ───────────── Layout ───────────── */
+main{padding:var(--s6) 0 var(--s7)}
+section{margin:0 0 var(--s7)}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s4);flex-wrap:wrap;margin-bottom:var(--s4)}
+.section-head h2{margin:0}
+.grid{display:grid;gap:var(--s4);grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.grid-2{display:grid;gap:var(--s4);grid-template-columns:1fr}
+@media(min-width:860px){.grid-2{grid-template-columns:1fr 1fr}.hero-grid{grid-template-columns:1.6fr 1fr!important}}
+.grid>*,.grid-2>*,.hero-grid>*,.kpis>*{min-width:0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:var(--s5);box-shadow:var(--shadow)}
+.card.tight{padding:var(--s4)}
+.card h3{margin-bottom:var(--s2)}
+.stack>*+*{margin-top:var(--s3)}
+
+/* ───────────── Hero ───────────── */
+.hero{padding-bottom:var(--s5)}
+.hero .lede{font-size:1.12rem;color:var(--muted);max-width:70ch;margin-top:var(--s2)}
+.hero-grid{display:grid;gap:var(--s4);grid-template-columns:1fr;margin-top:var(--s5)}
+.kpis{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:var(--s4);box-shadow:var(--shadow)}
+.kpi .label{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.kpi .value{font-size:2rem;font-weight:700;line-height:1.1;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .delta{font-size:.85rem}
+.kpi.ok .value{color:var(--ok)} .kpi.warn .value{color:var(--warn)} .kpi.bad .value{color:var(--bad)}
+.ask{border:1px solid var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--surface);border-radius:var(--r);padding:var(--s5)}
+.ask .label{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
+.ask h2,.ask h3{margin:6px 0 var(--s2);font-size:1.2rem}
+
+/* ───────────── Pills / chips / status ───────────── */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.plain::before{display:none}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.info{background:var(--info-soft);color:var(--info)}
+.pill.accent{background:var(--accent-soft);color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:999px;padding:4px 12px;font:inherit;font-size:.85rem;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.add{color:var(--ok)} .mod{color:var(--warn)} .del{color:var(--bad)}
+
+.theme-switch button{padding:4px 9px;display:inline-flex;gap:5px;align-items:center}
+.theme-switch .tl{font-size:.8rem}
+@media(max-width:640px){.theme-switch .tl{display:none}}
+
+/* ───────────── Tabs (no-JS: all panels stack) ───────────── */
+.tablist{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:var(--s4);overflow-x:auto}
+.tablist button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);font:inherit;font-weight:600;padding:10px 14px;cursor:pointer;white-space:nowrap;margin-bottom:-1px}
+.tablist button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.js .tab-panel[hidden]{display:none}
+html:not(.js) .tablist{display:none}
+
+/* ───────────── Segmented control ───────────── */
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--surface-2)}
+.seg button{border:0;background:none;color:var(--muted);font:inherit;font-size:.85rem;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+
+/* ───────────── Tables ───────────── */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:650;background:var(--surface-2);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+table.sortable th{cursor:pointer;user-select:none}
+table.sortable th[aria-sort="ascending"]::after{content:" ▲";font-size:.7em}
+table.sortable th[aria-sort="descending"]::after{content:" ▼";font-size:.7em}
+.filter-bar{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:center;margin-bottom:var(--s3)}
+.filter-bar input[type=search]{flex:1;min-width:180px;max-width:340px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:inherit}
+.empty-note{display:none;padding:var(--s4);color:var(--muted);text-align:center}
+
+/* ───────────── Details / accordions ───────────── */
+details{border:1px solid var(--border);border-radius:var(--r);background:var(--surface);margin-bottom:var(--s2)}
+details>summary{cursor:pointer;padding:var(--s3) var(--s4);font-weight:600;list-style:none;display:flex;align-items:center;gap:var(--s3)}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸";color:var(--muted);transition:transform .15s}
+details[open]>summary::before{transform:rotate(90deg)}
+details>.body{padding:0 var(--s4) var(--s4) calc(var(--s4) + 20px)}
+
+/* ───────────── Callouts ───────────── */
+.callout{border-left:3px solid var(--info);background:var(--info-soft);padding:var(--s3) var(--s4);border-radius:0 8px 8px 0}
+.callout.ok{border-color:var(--ok);background:var(--ok-soft)} .callout.warn{border-color:var(--warn);background:var(--warn-soft)} .callout.bad{border-color:var(--bad);background:var(--bad-soft)}
+.callout strong:first-child{display:block;margin-bottom:2px}
+
+/* ───────────── Timeline ───────────── */
+.timeline{list-style:none;margin:0;padding:0;position:relative}
+.timeline::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--border)}
+.timeline li{position:relative;padding:0 0 var(--s5) 36px}
+.timeline li::before{content:"";position:absolute;left:3px;top:5px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:3px solid var(--muted)}
+.timeline li.ok::before{border-color:var(--ok);background:var(--ok)} .timeline li.warn::before{border-color:var(--warn)} .timeline li.bad::before{border-color:var(--bad)} .timeline li.now::before{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+
+/* ───────────── Progress / meters ───────────── */
+.bar{height:8px;background:var(--surface-2);border-radius:999px;overflow:hidden}
+.bar>span{display:block;height:100%;background:var(--accent);border-radius:inherit;transition:width .2s}
+.bar.ok>span{background:var(--ok)} .bar.warn>span{background:var(--warn)} .bar.bad>span{background:var(--bad)}
+
+/* ───────────── Diagrams ───────────── */
+.diagram{width:100%;height:auto;display:block}
+.diagram text{fill:var(--text);font:13px var(--font)}
+.diagram .sub{fill:var(--muted);font-size:11px}
+.diagram .node rect{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+.diagram .node.new rect{stroke:var(--ok);fill:var(--ok-soft)}
+.diagram .node.changed rect{stroke:var(--warn);fill:var(--warn-soft)}
+.diagram .node.removed rect{stroke:var(--bad);stroke-dasharray:5 4;fill:var(--bad-soft)}
+.diagram .node[data-node]{cursor:pointer}
+.diagram .node[data-node]:hover rect,.diagram .node.selected rect{stroke:var(--accent);stroke-width:2.5}
+.diagram .edge{stroke:var(--muted);stroke-width:1.5;fill:none}
+.diagram .edge.new{stroke:var(--ok)} .diagram .edge.removed{stroke:var(--bad);stroke-dasharray:5 4}
+.diagram .arrow{fill:var(--muted)}
+.legend{display:flex;gap:var(--s4);flex-wrap:wrap;font-size:.85rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:12px;height:12px;border-radius:3px;display:inline-block;border:2px solid}
+
+/* ───────────── Viz stages & controls ───────────── */
+.stage{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;min-height:320px}
+.stage.tall{height:min(72vh,620px)}
+.stage canvas{display:block;width:100%!important;height:100%!important;touch-action:none}
+.stage .overlay{position:absolute;inset:auto auto 12px 12px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.stage .overlay>*{pointer-events:auto}
+.stage .hint{position:absolute;right:12px;bottom:10px;font-size:.75rem;color:var(--muted);pointer-events:none}
+.stage .lil-gui.root,.stage .lil-gui.lil-root{position:absolute;top:10px;right:10px;z-index:3;max-height:calc(100% - 20px);overflow:auto}
+.label3d{position:absolute;transform:translate(-50%,-50%);font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface);border:1px solid var(--border);white-space:nowrap;pointer-events:none}
+.viz-grid{display:grid;gap:var(--s4);grid-template-columns:1fr}
+@media(min-width:960px){.viz-grid{grid-template-columns:2fr 1fr}.viz-grid.even{grid-template-columns:1fr 1fr}}
+.viz-grid>*{min-width:0}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:var(--s4)}
+.control{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;margin-bottom:var(--s3);font-size:.9rem}
+.control output{font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+.control input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+select,textarea,input[type=text],input[type=number]{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+.btn{font:inherit;font-weight:600;font-size:.88rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;padding:6px 14px;cursor:pointer}
+.btn:hover{background:var(--surface-2)} .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.tip{position:fixed;z-index:50;pointer-events:none;background:var(--text);color:var(--bg);font-size:.8rem;line-height:1.35;padding:6px 10px;border-radius:6px;max-width:260px;opacity:0;transition:opacity .1s}
+.tip.on{opacity:1}
+.axis text{fill:var(--muted);font:11px var(--font)} .axis line,.axis path{stroke:var(--border)}
+.lil-gui{--background-color:var(--surface);--widget-color:var(--surface-2);--hover-color:var(--border);--focus-color:var(--border);--text-color:var(--text);--title-background-color:var(--surface-2);--title-text-color:var(--text);--number-color:var(--accent);--string-color:var(--ok);--font-family:var(--font);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.noscript-note{padding:var(--s4);color:var(--muted)}
+
+/* ───────────── Footer / print / motion ───────────── */
+footer{border-top:1px solid var(--border);padding:var(--s5) 0;font-size:.85rem;color:var(--muted)}
+@media print{
+  .topbar,.icon-btn,.filter-bar,.tablist,.seg,[data-no-print]{display:none!important}
+  .js .tab-panel[hidden]{display:block!important}
+  body{background:#fff;color:#000} .card,.kpi,details{break-inside:avoid;box-shadow:none}
+  details>.body{display:block!important}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <span class="brand">{{SHORT_TITLE}}</span>
+    <nav aria-label="Sections">
+      <a href="#summary">Summary</a>
+      <a href="#main">{{MAIN_SECTION}}</a>
+      <a href="#details">Details</a>
+      <a href="#risks">Risks</a>
+      <a href="#appendix">Appendix</a>
+    </nav>
+    <button class="icon-btn" data-expand-all="main" title="Expand / collapse all" aria-label="Expand or collapse all">⇕</button>
+    <div class="seg theme-switch" role="radiogroup" aria-label="Color theme" data-theme-switch>
+      <button type="button" role="radio" data-mode="light" title="Light"><span aria-hidden="true">☀</span><span class="tl">Light</span></button>
+      <button type="button" role="radio" data-mode="auto" title="Auto: follow OS setting"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg><span class="tl">Auto</span></button>
+      <button type="button" role="radio" data-mode="dark" title="Dark"><span aria-hidden="true">☾</span><span class="tl">Dark</span></button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- HERO: answer first. Status pill · headline · one-line context · KPIs · ask -->
+  <section id="summary" class="hero" aria-labelledby="h-title">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <span class="pill warn">{{STATUS}}</span>
+      <span class="pill plain">{{DATE}}</span>
+    </div>
+    <h1 id="h-title">{{HEADLINE — the one sentence the reader must leave with}}</h1>
+    <p class="lede">{{ONE_LINE_CONTEXT}}</p>
+
+    <div class="hero-grid">
+      <div class="kpis">
+        <div class="kpi"><div class="label">{{KPI}}</div><div class="value">{{N}}</div><div class="delta muted">{{CONTEXT}}</div></div>
+        <div class="kpi"><div class="label">{{KPI}}</div><div class="value">{{N}}</div><div class="delta muted">{{CONTEXT}}</div></div>
+        <div class="kpi"><div class="label">{{KPI}}</div><div class="value">{{N}}</div><div class="delta muted">{{CONTEXT}}</div></div>
+      </div>
+      <aside class="ask" aria-label="Decision needed">
+        <div class="label">Decision needed</div>
+        <h2>{{QUESTION}}</h2>
+        <p class="meta">Recommended: <strong>{{OPTION}}</strong> · by {{DEADLINE}}</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- MAIN VISUAL: diagram / timeline / diff / chart. See references/components.md -->
+  <section id="main" aria-labelledby="h-main">
+    <div class="section-head"><h2 id="h-main">{{MAIN_SECTION}}</h2></div>
+    <div class="card">{{MAIN_VISUAL}}</div>
+  </section>
+
+  <section id="details" aria-labelledby="h-details">
+    <div class="section-head"><h2 id="h-details">Details</h2></div>
+    {{DETAIL_COMPONENTS}}
+  </section>
+
+  <section id="risks" aria-labelledby="h-risks">
+    <div class="section-head"><h2 id="h-risks">Risks &amp; open questions</h2></div>
+    {{RISKS}}
+  </section>
+
+  <section id="appendix" aria-labelledby="h-appendix">
+    <div class="section-head"><h2 id="h-appendix">Appendix</h2></div>
+    <details><summary>Sources &amp; assumptions</summary><div class="body">{{SOURCES}}</div></details>
+  </section>
+
+</main>
+
+<footer><div class="wrap">Generated {{DATE}} · {{AUTHOR_OR_AGENT}} · self-contained HTML, works offline</div></footer>
+
+<!-- Libraries: delete the ones you don't use. build_report.py replaces each placeholder with the inlined library. -->
+<script data-vendor="d3"></script>
+<script data-vendor="three"></script>
+<script data-vendor="lil-gui"></script>
+
+<script>
+/* html-report helpers — progressive enhancement; page is fully readable without this. */
+(function(){
+  var d=document, root=d.documentElement; root.classList.add('js');
+  var $=function(s,c){return (c||d).querySelector(s)}, $$=function(s,c){return Array.prototype.slice.call((c||d).querySelectorAll(s))};
+  var store={get:function(k){try{return localStorage.getItem(k)}catch(e){return null}},set:function(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+  /* Theme: Light / Auto / Dark  ([data-theme-switch] > button[data-mode]).
+     auto (default) = no data-theme attribute -> CSS follows prefers-color-scheme live.
+     light/dark     = data-theme on <html> overrides the OS. Choice persists in localStorage('report-theme'),
+     shared by every report opened from the same origin (e.g. all local files). Head script applies it before first paint. */
+  function getMode(){var m=store.get('report-theme');return m==='light'||m==='dark'?m:'auto'}
+  function setMode(m,silent){
+    if(m!=='light'&&m!=='dark')m='auto';
+    if(m==='auto')root.removeAttribute('data-theme'); else root.setAttribute('data-theme',m);
+    store.set('report-theme',m);
+    $$('[data-theme-switch] [data-mode]').forEach(function(b){var on=b.dataset.mode===m;b.setAttribute('aria-checked',on);b.setAttribute('aria-pressed',on);b.tabIndex=on?0:-1});
+    if(!silent)d.dispatchEvent(new Event('report:theme'));
+  }
+  $$('[data-theme-switch]').forEach(function(g){var bs=$$('[data-mode]',g);
+    bs.forEach(function(b,i){b.addEventListener('click',function(){setMode(b.dataset.mode)});
+      b.addEventListener('keydown',function(e){var k=e.key==='ArrowRight'||e.key==='ArrowDown'?1:e.key==='ArrowLeft'||e.key==='ArrowUp'?-1:0;
+        if(k){e.preventDefault();var n=bs[(i+k+bs.length)%bs.length];n.focus();setMode(n.dataset.mode)}})})});
+  setMode(getMode(),true);
+
+  /* Tabs: .tabs > .tablist > button[data-tab=panelId] ; .tab-panel#panelId */
+  $$('.tabs').forEach(function(t){
+    var btns=$$('.tablist button',t);
+    function sel(id){btns.forEach(function(b){var on=b.dataset.tab===id;b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1;var p=d.getElementById(b.dataset.tab);if(p)p.hidden=!on;})}
+    btns.forEach(function(b,i){b.setAttribute('role','tab');b.addEventListener('click',function(){sel(b.dataset.tab)});
+      b.addEventListener('keydown',function(e){var k=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;if(k){var n=btns[(i+k+btns.length)%btns.length];n.focus();sel(n.dataset.tab)}})});
+    $('.tablist',t).setAttribute('role','tablist'); if(btns[0]) sel((btns.filter(function(b){return b.hasAttribute('data-default')})[0]||btns[0]).dataset.tab);
+  });
+
+  /* Segmented view switch: .seg[data-target=sel] > button[data-view=x] → sets target[data-view]; children with [data-show~=x] visible */
+  $$('.seg[data-target]').forEach(function(s){
+    var tgt=$(s.dataset.target), btns=$$('button',s);
+    function set(v){btns.forEach(function(b){b.setAttribute('aria-pressed',b.dataset.view===v)}); tgt.dataset.view=v;
+      $$('[data-show]',tgt).forEach(function(el){el.hidden=el.dataset.show.split(' ').indexOf(v)<0})}
+    btns.forEach(function(b){b.addEventListener('click',function(){set(b.dataset.view)})}); if(btns[0]) set(btns[0].dataset.view);
+  });
+
+  /* Filtering: input[data-filter=sel] text + .chips[data-filter-chips=sel] > .chip[data-value]; items = [data-item] or tbody tr; items carry data-tags="a b" */
+  function applyFilter(scopeSel){
+    var scope=$(scopeSel); if(!scope) return;
+    var inp=$('input[data-filter="'+scopeSel+'"]'), q=inp?inp.value.trim().toLowerCase():'';
+    var active={}; $$('.chips[data-filter-chips="'+scopeSel+'"]').forEach(function(g){var vals=$$('.chip[aria-pressed="true"]',g).map(function(c){return c.dataset.value});if(vals.length&&vals.indexOf('*')<0)active[g.dataset.group||'g']=vals});
+    var items=$$('[data-item]',scope); if(!items.length) items=$$('tbody tr',scope); var shown=0;
+    items.forEach(function(it){var txt=it.textContent.toLowerCase(), tags=(it.dataset.tags||'').split(' '), ok=!q||txt.indexOf(q)>=0;
+      for(var g in active){ if(!active[g].some(function(v){return tags.indexOf(v)>=0})) ok=false; }
+      it.hidden=!ok; if(ok) shown++;});
+    var empty=$('.empty-note',scope.parentNode); if(empty) empty.style.display=shown?'none':'block';
+    var cnt=$('[data-count="'+scopeSel+'"]'); if(cnt) cnt.textContent=shown+' / '+items.length;
+  }
+  $$('input[data-filter]').forEach(function(i){i.addEventListener('input',function(){applyFilter(i.dataset.filter)})});
+  $$('.chips[data-filter-chips]').forEach(function(g){
+    var multi=g.hasAttribute('data-multi');
+    $$('.chip',g).forEach(function(c){ if(!c.hasAttribute('aria-pressed')) c.setAttribute('aria-pressed','false');
+      c.addEventListener('click',function(){
+        if(multi&&c.dataset.value!=='*'){c.setAttribute('aria-pressed',c.getAttribute('aria-pressed')!=='true'); var all=$('.chip[data-value="*"]',g); if(all) all.setAttribute('aria-pressed','false');}
+        else $$('.chip',g).forEach(function(o){o.setAttribute('aria-pressed',o===c)});
+        applyFilter(g.dataset.filterChips);});});
+    applyFilter(g.dataset.filterChips);
+  });
+
+  /* Sortable tables: table.sortable ; th[data-type=num] for numeric ; td[data-sort] overrides value */
+  $$('table.sortable').forEach(function(tb){
+    $$('thead th',tb).forEach(function(th,ci){ th.tabIndex=0;
+      function go(){var asc=th.getAttribute('aria-sort')!=='ascending', num=th.dataset.type==='num', body=tb.tBodies[0];
+        $$('thead th',tb).forEach(function(o){o.removeAttribute('aria-sort')}); th.setAttribute('aria-sort',asc?'ascending':'descending');
+        $$('tr',body).sort(function(a,b){var x=a.cells[ci],y=b.cells[ci];x=x.dataset.sort||x.textContent.trim();y=y.dataset.sort||y.textContent.trim();
+          if(num){x=parseFloat(x.replace(/[^\d.-]/g,''))||0;y=parseFloat(y.replace(/[^\d.-]/g,''))||0;return asc?x-y:y-x}
+          return asc?x.localeCompare(y,undefined,{numeric:true}):y.localeCompare(x,undefined,{numeric:true})}).forEach(function(r){body.appendChild(r)});}
+      th.addEventListener('click',go); th.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}});
+    });
+  });
+
+  /* Expand/collapse all details: [data-expand-all=scopeSel] */
+  $$('[data-expand-all]').forEach(function(b){b.addEventListener('click',function(){
+    var ds=$$('details',$(b.dataset.expandAll)||d), open=ds.some(function(x){return !x.open}); ds.forEach(function(x){x.open=open});})});
+
+  /* Copy: button[data-copy=sel] copies target's text */
+  $$('[data-copy]').forEach(function(b){b.addEventListener('click',function(){
+    var t=$(b.dataset.copy); if(!t) return; var txt=t.innerText, old=b.textContent;
+    function done(){b.textContent='Copied ✓';setTimeout(function(){b.textContent=old},1200)}
+    if(navigator.clipboard) navigator.clipboard.writeText(txt).then(done,function(){}); else {var r=d.createRange();r.selectNodeContents(t);var s=getSelection();s.removeAllRanges();s.addRange(r);try{d.execCommand('copy');done()}catch(e){}}
+  })});
+
+  /* Diagram nodes: [data-node=id] click → copies <template id="node-id"> into [data-node-panel] */
+  $$('[data-node]').forEach(function(n){ n.setAttribute('tabindex','0'); n.setAttribute('role','button');
+    function show(){var tpl=d.getElementById('node-'+n.dataset.node), panel=$('[data-node-panel]'); if(!tpl||!panel) return;
+      $$('[data-node]').forEach(function(o){o.classList.toggle('selected',o===n)}); panel.innerHTML=''; panel.appendChild(tpl.content.cloneNode(true));}
+    n.addEventListener('click',show); n.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}});
+  });
+
+  /* Checklist progress: input[type=checkbox][data-progress=barSel] ; state saved per page */
+  var pageKey='report-checks:'+location.pathname+d.title;
+  var checks={}; try{checks=JSON.parse(store.get(pageKey)||'{}')}catch(e){}
+  function prog(sel){var boxes=$$('input[data-progress="'+sel+'"]'), done=boxes.filter(function(b){return b.checked}).length, bar=$(sel);
+    if(bar){var sp=$('span',bar); if(sp) sp.style.width=(boxes.length?done/boxes.length*100:0)+'%'} var lab=$('[data-progress-label="'+sel+'"]'); if(lab) lab.textContent=done+' / '+boxes.length;}
+  $$('input[data-progress]').forEach(function(b,i){var k=b.id||('c'+i); if(k in checks) b.checked=checks[k];
+    b.addEventListener('change',function(){checks[k]=b.checked;store.set(pageKey,JSON.stringify(checks));prog(b.dataset.progress)}); prog(b.dataset.progress);});
+
+  /* ── Viz runtime: window.R ─────────────────────────────────────────────
+     R.css('--accent')      → current token value (re-read after theme change)
+     R.onTheme(fn)          → fn() on toggle or OS theme change (re-color charts/3D)
+     R.tip.show(evt, html) / R.tip.hide()  → shared tooltip
+     R.webgl()              → true if WebGL is available (gate three.js; show fallback otherwise)
+     R.reduced              → prefers-reduced-motion (skip autoplay/rotation)
+     R.visible(el, fn)      → fn(true/false) when el enters/leaves viewport (pause render loops off-screen)
+     R.theme.get() / R.theme.set('light'|'dark'|'auto') / R.theme.isDark()
+     R.esc(str)             → HTML-escape */
+  var tipEl=d.createElement('div'); tipEl.className='tip'; tipEl.setAttribute('role','tooltip'); d.body.appendChild(tipEl);
+  var themeFns=[]; function fireTheme(){themeFns.forEach(function(f){try{f()}catch(e){console.error(e)}})}
+  d.addEventListener('report:theme',fireTheme); try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',fireTheme)}catch(e){}
+  window.R={
+    css:function(n){return getComputedStyle(root).getPropertyValue(n).trim()},
+    onTheme:function(f){themeFns.push(f)},
+    tip:{show:function(e,h){tipEl.innerHTML=h;tipEl.classList.add('on');var x=e.clientX+14,y=e.clientY+14,w=tipEl.offsetWidth,hh=tipEl.offsetHeight;
+          if(x+w>innerWidth-8)x=e.clientX-w-14; if(y+hh>innerHeight-8)y=e.clientY-hh-14; tipEl.style.left=x+'px';tipEl.style.top=y+'px'},
+         hide:function(){tipEl.classList.remove('on')}},
+    webgl:function(){try{var c=d.createElement('canvas');return !!(window.WebGLRenderingContext&&(c.getContext('webgl2')||c.getContext('webgl')))}catch(e){return false}},
+    reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,
+    visible:function(el,fn){if(!('IntersectionObserver' in window)){fn(true);return}new IntersectionObserver(function(es){fn(es[0].isIntersecting)}).observe(el)},
+    theme:{get:getMode,set:setMode,isDark:function(){var t=root.getAttribute('data-theme');return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches}},
+    esc:function(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  };
+
+  /* Active nav link on scroll */
+  var links=$$('.topbar nav a[href^="#"]'); if('IntersectionObserver' in window && links.length){
+    var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){links.forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id)})}})},{rootMargin:'-45% 0px -50% 0px'});
+    links.forEach(function(a){var s=d.getElementById(a.getAttribute('href').slice(1)); if(s) io.observe(s)});
+  }
+})();
+</script>
+
+<script>
+/* Page scripts go here: after the helpers so window.R, d3, THREE, lil are ready.
+   Pattern per viz: function draw(){...}; draw(); R.onTheme(draw); window.addEventListener('resize', debounce(draw)). */
+</script>
+</body>
+</html>
