@@ -18,23 +18,28 @@ The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: Ski
 
 ## Usage
 
-With SkillSinc, add this repository as a source in `~/.config/skillsinc/config.json`:
+With [SkillSinc](https://github.com/mikejhill/skillsinc) 0.5.0 or later, add this repository as a remote source in `~/.config/skillsinc/config.json`. SkillSinc keeps a cached checkout current (one `git ls-remote` per run) and keeps serving the last good copy if GitHub is unreachable:
 
 ```jsonc
 {
   "version": 1,
   "sources": {
-    "public": { "path": "~/path/to/this/repo" },
+    "public": { "github": "mikejhill/agent-skills" },
   },
   // destinations and routes as usual
 }
 ```
+
+Pin a branch, tag, or commit with `"ref"`, and check the remote less often with `"refresh": "1h"`. See [remote sources](https://github.com/mikejhill/skillsinc/blob/main/docs/guides/configuration.md#remote-sources).
+
+To sync a local clone instead (for example while editing it), use `"path": "~/path/to/agent-skills"`.
 
 Then preview and apply:
 
 ```bash
 skillsinc plan
 skillsinc sync
+skillsinc status   # remote check and error state for each source
 ```
 
 Without SkillSinc, copy a skill folder into your harness's skills directory (for example `~/.claude/skills/` or `~/.agents/skills/`).
