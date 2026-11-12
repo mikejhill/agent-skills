@@ -1,7 +1,9 @@
 # Intent
 
-Let any agent drive the user's own running Chromium browser (Edge, Chrome, Brave) through
-the Chrome DevTools Protocol, with their real tabs and logins, at minimum friction.
+Let any agent take control of the user's own running Chromium browser (Edge, Chrome, Brave)
+to complete tasks in it, with their real tabs and logins, at minimum friction. CDP is the
+implementation; DevTools-style inspection (cookies, network, emulation) is a feature, not
+the purpose.
 
 ## Goals
 
@@ -22,3 +24,6 @@ the Chrome DevTools Protocol, with their real tabs and logins, at minimum fricti
   localhost broker, flat-session target attach, event buffer), SKILL.md, recipes and
   troubleshooting references. Verified on headless Chromium and on Edge (Windows) in
   toggle mode: one prompt per broker, pythonw with no window, `/json/*` returns 404.
+- 2026-11-12: [agent] Renamed `browser-devtools` → `browser-control` (script `browser.py`,
+  state dir `browser-control`). Reframed SKILL.md around controlling the browser for tasks;
+  CDP moved to a "How it works" note.

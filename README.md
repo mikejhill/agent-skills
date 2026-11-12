@@ -2,7 +2,7 @@
 
 [![Markdown Lint](https://github.com/mikejhill/agent-skills/actions/workflows/markdown-lint.yml/badge.svg?branch=main)](https://github.com/mikejhill/agent-skills/actions/workflows/markdown-lint.yml)
 
-Reusable skills, instructions, agents, prompts, and reference resources for AI coding assistants (Claude Code, GitHub Copilot, VS Code, Codex, and other harnesses that read `SKILL.md`-style folders).
+Reusable skills, instructions, agents, prompts, and reference resources for AI coding assistants that follow the open [Agent Skills](https://agentskills.io) format and work across harnesses (Claude Code, Codex, and any other agent that reads `SKILL.md` folders).
 
 The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: SkillSinc converts and distributes each item into every configured harness.
 

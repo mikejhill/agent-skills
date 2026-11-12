@@ -18,7 +18,7 @@ personas, and comprehensive examples.
 
 ### In-Scope
 
-- Instruction writing for any Copilot feature type: agent skills, instructions
+- Instruction writing for any agent feature type: agent skills, instructions
   files, prompt files, and custom agents
 - The 8-section template (objective, scope, inputs, outputs, constraints,
   procedure, validation, examples) and how to apply it
@@ -33,14 +33,38 @@ personas, and comprehensive examples.
 
 ### Out-of-Scope
 
-- Feature type selection — use the
-  [copilot-features](../copilot-features/SKILL.md) skill to choose between
-  skills, instructions files, prompts, agents, and hooks
+- Harness-specific file locations and frontmatter beyond the portable fields
+  listed in [Choosing the Feature Type](#choosing-the-feature-type)
 - Agent hooks — hooks are JSON configuration, not instruction sets
 - General prompt engineering theory (attention mechanisms, temperature,
   chain-of-thought reasoning)
 - Chat-style prompting or conversational optimization
 - RAG pipeline design, model fine-tuning, or training data curation
+
+## Choosing the Feature Type
+
+Pick the narrowest portable feature that fits. Harnesses differ in file
+locations and extra frontmatter; author the portable form and let the
+distribution tool (or the user) place it.
+
+| Need | Feature type | Portable form |
+| --- | --- | --- |
+| On-demand capability, optionally with scripts, templates, or references | Agent skill | `skills/<name>/SKILL.md` with `name` and `description` frontmatter ([Agent Skills](https://agentskills.io) format) |
+| Rules for every task in a repository | Repository instructions | `AGENTS.md` at the repository root (no frontmatter) |
+| Rules scoped to file patterns or always-on across repositories | Instructions file | `<name>.instructions.md` with `description` and optional `applyTo` glob |
+| Role with its own context window, scope, or tool limits | Custom agent / subagent | `<name>.agent.md` with `name` and `description` |
+| Explicit, user-invoked single task | Prompt / command | `<name>.prompt.md` with `description` |
+| Guaranteed, deterministic action at a lifecycle event | Hook | Harness configuration, not an instruction set (out of scope) |
+
+- Prefer a skill over a prompt or command: skills load on demand and are the
+  most portable type.
+- Prefer a skill over an always-on instructions file unless the rule applies to
+  most work; always-on content costs context on every request.
+- For a skill, the `description` is the only text used for activation. State
+  the capability and when to use it.
+- Names are lowercase and hyphen-separated, 64 characters or fewer.
+- Record the operator's goals and decision log in an intent file; see
+  [Intent Files](../../resources/intent-files.md).
 
 ## Inputs
 
@@ -49,7 +73,7 @@ personas, and comprehensive examples.
 | Input | Description |
 | --- | --- |
 | **Task description** | What the instruction set must accomplish |
-| **Target feature type** | Skill, instructions file, prompt file, or custom agent. If unknown, invoke the [copilot-features](../copilot-features/SKILL.md) skill first. |
+| **Target feature type** | Skill, instructions file, prompt file, or custom agent. If unknown, choose one with [Choosing the Feature Type](#choosing-the-feature-type) first. |
 | **Domain** | The subject area the instructions cover (e.g., "testing", "security", "documentation") |
 
 ### Optional
@@ -71,7 +95,7 @@ personas, and comprehensive examples.
 
 A complete instruction set in Markdown containing all applicable sections of
 the 8-section template. The output is a single Markdown file (or inline
-Markdown content) ready for use as a Copilot feature.
+Markdown content) ready for use as an agent feature.
 
 For agent skills (the most complete form), the output contains:
 
@@ -302,8 +326,9 @@ dependency chain, not a suggestion.
 
 Frontmatter (name, description, optional flags) is platform metadata, not a
 template section. Write it after completing the 8 steps. For valid fields and
-platform-specific requirements, see the
-[copilot-features](../copilot-features/SKILL.md) skill.
+harness-specific requirements, see
+[Choosing the Feature Type](#choosing-the-feature-type) and the target harness's
+documentation.
 
 ### Step 1 — Set the Objective
 
@@ -321,8 +346,8 @@ Write exactly one sentence stating the measurable outcome.
 - List every explicit out-of-scope item (what IS NOT included).
 - Default scope to nothing; add only what is explicitly allowed.
 - If a related skill or instruction set covers an adjacent topic, reference it
-  in the out-of-scope list: "Feature type selection is out of scope — use the
-  copilot-features skill."
+  in the out-of-scope list: "Diagram syntax is out of scope — use the
+  mermaid-diagrams skill."
 
 ### Step 3 — List Inputs
 
