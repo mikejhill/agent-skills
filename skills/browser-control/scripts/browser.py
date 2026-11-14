@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""devtools.py - Chrome DevTools Protocol CLI backed by one persistent, windowless broker.
+"""browser.py - control the user's own running Chromium browser (Chrome, Edge, Brave).
 
 Stdlib only (Python 3.8+). The broker holds a single WebSocket to the browser so the
 user approves the browser's "Allow remote debugging?" prompt once per session, not once
 per command. Every CLI call talks to the broker over a token-protected localhost socket.
 
-    devtools.py status                      endpoint detection + broker state
-    devtools.py start [--idle 900]          start broker (other commands auto-start it)
-    devtools.py stop                        stop broker (closes the WebSocket)
-    devtools.py targets [--all]             list tabs (id, type, title, url)
-    devtools.py send METHOD [JSON] [-p k=v] [-t TARGET]   raw CDP command
-    devtools.py eval EXPR -t TARGET         Runtime.evaluate (returnByValue, awaitPromise)
-    devtools.py open URL                    new tab, prints targetId
-    devtools.py nav URL -t TARGET           navigate and wait for load
-    devtools.py click SELECTOR -t TARGET    trusted mouse click at element center
-    devtools.py type TEXT -t TARGET [-s SELECTOR] [--replace]
-    devtools.py key Enter [ctrl+a ...] -t TARGET
-    devtools.py screenshot FILE -t TARGET [--full]
-    devtools.py pdf FILE -t TARGET [-p landscape=true ...]
-    devtools.py events [-t T] [-f PREFIX] [--since N] [--wait S] [--count N]
-    devtools.py mark                        print last event seq (use as --since)
-    devtools.py batch FILE|-                JSON lines: {"method":..,"params":..,"target":..}
-    devtools.py enable-help [--launch]      how to turn on remote debugging
+    browser.py status                      endpoint detection + broker state
+    browser.py start [--idle 900]          start broker (other commands auto-start it)
+    browser.py stop                        stop broker (closes the WebSocket)
+    browser.py targets [--all]             list tabs (id, type, title, url)
+    browser.py send METHOD [JSON] [-p k=v] [-t TARGET]   raw CDP command
+    browser.py eval EXPR -t TARGET         Runtime.evaluate (returnByValue, awaitPromise)
+    browser.py open URL                    new tab, prints targetId
+    browser.py nav URL -t TARGET           navigate and wait for load
+    browser.py click SELECTOR -t TARGET    trusted mouse click at element center
+    browser.py type TEXT -t TARGET [-s SELECTOR] [--replace]
+    browser.py key Enter [ctrl+a ...] -t TARGET
+    browser.py screenshot FILE -t TARGET [--full]
+    browser.py pdf FILE -t TARGET [-p landscape=true ...]
+    browser.py events [-t T] [-f PREFIX] [--since N] [--wait S] [--count N]
+    browser.py mark                        print last event seq (use as --since)
+    browser.py batch FILE|-                JSON lines: {"method":..,"params":..,"target":..}
+    browser.py enable-help [--launch]      how to turn on remote debugging
 
 TARGET = targetId (or unique prefix), or a case-insensitive substring of the tab's URL or
 title. Browser-level methods (Target.*, Browser.*, SystemInfo.*, Storage.*) need no target.
@@ -175,15 +175,15 @@ def with_dt(expr):
 # --------------------------------------------------------------------------- paths
 
 def state_dir():
-    if os.environ.get("BROWSER_DEVTOOLS_HOME"):  # isolate test brokers from the real one
-        base = os.environ["BROWSER_DEVTOOLS_HOME"]
+    if os.environ.get("BROWSER_CONTROL_HOME"):  # isolate test brokers from the real one
+        base = os.environ["BROWSER_CONTROL_HOME"]
     elif IS_WIN:
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
     elif IS_MAC:
         base = os.path.expanduser("~/Library/Caches")
     else:
         base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    d = os.path.join(base, "browser-devtools")
+    d = os.path.join(base, "browser-control")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -514,7 +514,7 @@ class Broker:
         if len(pages) == 1:
             return pages[0]
         if not pages:
-            raise ValueError("no target matches %r; run `devtools.py targets`" % spec)
+            raise ValueError("no target matches %r; run `browser.py targets`" % spec)
         raise ValueError("%r is ambiguous (%d matches): %s" % (spec, len(pages), ", ".join(
             "%s %s" % (t["targetId"][:8], t.get("url", "")[:60]) for t in pages[:6])))
 
@@ -805,7 +805,7 @@ def ensure_broker(args, quiet=False):
         want_port, want_browser = getattr(args, "port", None), getattr(args, "browser", None)
         ep = (s or {}).get("endpoint") or {}
         if s and ((want_port and ep.get("port") != want_port) or (want_browser and ep.get("name") != want_browser)):
-            raise CLIError("a broker is already running for %s (port %s); run `devtools.py stop` "
+            raise CLIError("a broker is already running for %s (port %s); run `browser.py stop` "
                            "before targeting another browser" % (ep.get("name"), ep.get("port")))
         if s and s.get("state") in ("connected", "connecting"):
             if s["state"] == "connecting":
@@ -1001,7 +1001,7 @@ def cmd_eval(args):
     # (cheap no-op once defined), so __dt survives navigations without re-injection.
     r = check(send(args, "Runtime.evaluate", {"expression": expr if args.no_helpers else with_dt(expr),
                                               "awaitPromise": True, "userGesture": True, "replMode": True,
-                                              "objectGroup": "devtoolscli"}, t, args.timeout))
+                                              "objectGroup": "browsercli"}, t, args.timeout))
     if r.get("exceptionDetails"):
         ed = r["exceptionDetails"]
         raise CLIError("JS exception: %s" % (ed.get("exception", {}).get("description") or ed.get("text")))
@@ -1019,7 +1019,7 @@ def cmd_eval(args):
             return out({k: res[k] for k in ("type", "subtype", "className", "description") if k in res}, args)
         out(vr["result"].get("value"), args)
     finally:
-        rpc({"op": "send", "method": "Runtime.releaseObjectGroup", "params": {"objectGroup": "devtoolscli"},
+        rpc({"op": "send", "method": "Runtime.releaseObjectGroup", "params": {"objectGroup": "browsercli"},
              "target": t, "nowait": True}, broker(args))
 
 
@@ -1363,7 +1363,7 @@ def add_wait_flags(p, settle_default=True):
 
 
 def main(argv=None, nested=False):
-    ap = argparse.ArgumentParser(prog="devtools", description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(prog="browser", description=__doc__.split("\n\n")[0])
     ap.add_argument("--browser", help="profile name: edge, chrome, brave, edge-beta, ... (default: first live)")
     ap.add_argument("--port", type=int, help="explicit debug port (classic --remote-debugging-port)")
     ap.add_argument("--compact", action="store_true", help=argparse.SUPPRESS)  # now the default

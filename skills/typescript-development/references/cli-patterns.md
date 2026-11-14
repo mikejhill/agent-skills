@@ -89,7 +89,7 @@ Preserve established exit-code contracts. The Application boundary maps known in
 - Inject an output writer for unit tests; serialize one result per documented output contract.
 - Read version from packaged metadata or a generated build constant tied to it. Resolve metadata relative to import.meta.url, then test both source and emitted layout; moving main to `dist/src/` changes relative paths.
 - Parse config/JSON/env as `unknown` and validate before constructing readonly options. Define precedence explicitly: defaults, file, environment, arguments.
-- Use the existing platform configuration-directory policy; agent skill CLIs may follow the skill-cli-development convention when applicable. Do not hard-code a general application to `~/.config/copilot-skills`.
+- Use the existing platform configuration-directory policy; agent skill CLIs may follow the skill-cli-development convention when applicable. Do not hard-code a general application to `~/.config/agent-skills`.
 - Do not store/log secrets in examples. Credentials and network permissions require existing authorization.
 
 ## Behavioral checks

@@ -1,6 +1,6 @@
-# Browser DevTools recipes
+# Browser control recipes
 
-`C` = `python scripts/devtools.py`, `T` = a target from `C targets`. All verified against Chromium.
+`C` = `python scripts/browser.py`, `T` = a target from `C targets`. All verified against Chromium.
 
 ## Reading pages
 
@@ -149,7 +149,7 @@ C send DOM.getDocument -t T                        # root nodeId
 C send DOM.querySelector -p nodeId=1 -p selector="input[type=file]" -t T
 C send DOM.setFileInputFiles -p nodeId=<id> -p 'files=["C:\\path\\file.txt"]' -t T
 # downloads to a folder
-C send Browser.setDownloadBehavior -p behavior=allow -p downloadPath="C:\\Users\\me\\Downloads\\devtools" -p eventsEnabled=true
+C send Browser.setDownloadBehavior -p behavior=allow -p downloadPath="C:\\Users\\me\\Downloads\\browser" -p eventsEnabled=true
 ```
 
 ## Iframes / workers

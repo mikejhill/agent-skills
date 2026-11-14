@@ -134,7 +134,7 @@ from web_auth_bridge import WebAuthBridge, Credentials
 async def main() -> None:
     bridge = WebAuthBridge(
         auth_callback=MyServiceAuth(),
-        cache_dir=Path("~/.config/copilot-skills/my-skill/cache"),
+        cache_dir=Path("~/.config/agent-skills/my-skill/cache"),
         credentials=Credentials(username="user@example.com", password="secret"),
         headless=True,
     )
@@ -196,7 +196,7 @@ When credentials cannot be stored or the flow requires visual interaction:
 ```python
 bridge = WebAuthBridge(
     auth_callback=MyServiceAuth(),
-    cache_dir=Path("~/.config/copilot-skills/my-skill/cache"),
+    cache_dir=Path("~/.config/agent-skills/my-skill/cache"),
     credentials=None,  # No stored credentials
     headless=False,     # User sees the browser
 )
@@ -230,7 +230,7 @@ def _load_credentials(config_dir: Path) -> Credentials | None:
 
 
 async def _run(args: argparse.Namespace) -> None:
-    config_dir = Path("~/.config/copilot-skills/my-skill").expanduser()
+    config_dir = Path("~/.config/agent-skills/my-skill").expanduser()
     credentials = _load_credentials(config_dir)
 
     bridge = WebAuthBridge(

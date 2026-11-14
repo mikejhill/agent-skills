@@ -48,8 +48,8 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 
 ## Broker internals
 
-- State: `%LOCALAPPDATA%\browser-devtools\broker.json` (Windows), `~/Library/Caches/browser-devtools`
-  (macOS), `~/.cache/browser-devtools` (Linux): port, random token, pid. Log: `broker.log` there.
+- State: `%LOCALAPPDATA%\browser-control\broker.json` (Windows), `~/Library/Caches/browser-control`
+  (macOS), `~/.cache/browser-control` (Linux): port, random token, pid. Log: `broker.log` there.
 - Listens on `127.0.0.1` random port; every request must carry the token from the
   state file (other local users can't drive the browser).
 - Windows: spawned with `pythonw.exe` + `CREATE_NO_WINDOW | DETACHED_PROCESS`, so no console
@@ -57,7 +57,7 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 - Exits on: `stop`, idle timeout (default 900 s since the last CLI request), browser
   disconnect, or failed connect. It removes its state file on exit.
 - One broker per user. To switch browsers: `stop`, then `--browser other start`.
-- `BROWSER_DEVTOOLS_HOME=DIR` moves the state directory (isolated brokers for tests;
+- `BROWSER_CONTROL_HOME=DIR` moves the state directory (isolated brokers for tests;
   `tests/smoke_test.py` uses it so it never touches the user's broker).
 - Stuck process (rare): find the pid in `broker.json` and kill it (`taskkill /PID n /F`,
   `kill n`), then delete `broker.json`.

@@ -19,7 +19,7 @@ rules when they conflict.
 
 ## Asking Questions
 
-Use `#tool:vscode/askQuestions` (or the equivalent `ask_user` tool)
+Use the harness's structured ask-user tool (plain text if none)
 **only** for genuinely blocking ambiguity. Analyze first — read files,
 check diffs, examine context — before asking anything.
 

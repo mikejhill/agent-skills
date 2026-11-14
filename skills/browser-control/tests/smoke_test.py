@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test for devtools.py against a throwaway headless browser.
+"""End-to-end smoke test for browser.py against a throwaway headless browser.
 
 Starts tests/fixture_server.py (an SPA built from shadow-DOM custom elements with timer
 and fetch delays, like many enterprise Angular apps) and a headless Chromium with its own
@@ -23,7 +23,7 @@ import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CLI = os.path.join(HERE, "..", "scripts", "devtools.py")
+CLI = os.path.join(HERE, "..", "scripts", "browser.py")
 
 
 def free_port():
@@ -70,9 +70,9 @@ def main():
     ap.add_argument("--chrome")
     args = ap.parse_args()
     chrome = find_chrome(args.chrome)
-    tmp = tempfile.mkdtemp(prefix="devtools-smoke-")
+    tmp = tempfile.mkdtemp(prefix="browser-smoke-")
     web, cdp = free_port(), free_port()
-    env = dict(os.environ, BROWSER_DEVTOOLS_HOME=os.path.join(tmp, "state"))
+    env = dict(os.environ, BROWSER_CONTROL_HOME=os.path.join(tmp, "state"))
     procs = [subprocess.Popen([sys.executable, os.path.join(HERE, "fixture_server.py"), str(web)]),
              subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=%d" % cdp,
                                "--user-data-dir=" + os.path.join(tmp, "profile"), "--no-first-run",
