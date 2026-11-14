@@ -24,6 +24,13 @@ the purpose.
   localhost broker, flat-session target attach, event buffer), SKILL.md, recipes and
   troubleshooting references. Verified on headless Chromium and on Edge (Windows) in
   toggle mode: one prompt per broker, pythonw with no window, `/json/*` returns 404.
-- 2026-11-12: [agent] Renamed `browser-devtools` → `browser-control` (script `browser.py`,
-  state dir `browser-control`). Reframed SKILL.md around controlling the browser for tasks;
+- 2026-11-13: [agent] Speed pass from a real run (8 min of SPA navigation on a shadow-DOM
+  enterprise SPA: 39 tool calls, 108 CLI invocations, 145 s of fixed sleeps, helpers
+  re-injected 17 times). Added settle-waits in the broker (in-flight network + spinner +
+  text stability) on `click`/`nav`/`wait`, shadow-DOM-piercing `text` and `click --text`,
+  `run` for multi-step calls, `net`/`body` for XHR JSON, an always-present `__dt` helper
+  library in `eval`, compact JSON by default, string-safe `*Id` params, hash-route `nav`,
+  and a broker/endpoint mismatch guard. Added `tests/smoke_test.py` with a fixture SPA.
+- 2026-11-14: [agent] Renamed `browser-devtools` → `browser-control` (script `browser.py`,
+  state dir `browser-control`, env `BROWSER_CONTROL_HOME`). Reframed SKILL.md around controlling the browser for tasks;
   CDP moved to a "How it works" note.
