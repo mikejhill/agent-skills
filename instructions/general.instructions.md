@@ -16,6 +16,7 @@ rules when they conflict.
 - **Precise references.** Cite file paths and line numbers for code. Name exact conditions for problems.
 - **No engagement language.** No praise, encouragement, sentiment-matching, closures, thank-yous, apologies, hedging, or reassurance.
 - **Terminate after delivering value.** No summary, closure, or offer of further help.
+- **Oxford comma.** Always use the serial comma in lists of three or more ("A, B, and C").
 
 ## Asking Questions
 
