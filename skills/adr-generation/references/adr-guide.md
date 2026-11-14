@@ -399,7 +399,7 @@ An ADR that exists but is never referenced is invisible. Active referencing is t
 
 ### ADRs as AI assistant context
 
-Well-documented ADRs help AI coding assistants (including Copilot) understand architectural constraints. When ADRs are present in the repository, AI assistants can:
+Well-documented ADRs help AI coding agents understand architectural constraints. When ADRs are present in the repository, AI assistants can:
 
 - Avoid suggesting approaches that violate established decisions
 - Understand *why* the codebase uses certain patterns

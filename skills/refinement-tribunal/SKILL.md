@@ -749,14 +749,14 @@ Failure conditions take precedence over pass conditions when both apply:
 
 ## Examples
 
-### Example 1 — Refining a Copilot Agent Skill
+### Example 1 — Refining a Agent Skill
 
-**User input**: `#refinement-tribunal features/skills/testing-standards/SKILL.md`
+**User input**: `/refinement-tribunal skills/testing-standards/SKILL.md`
 
 **Phase 1 — Preparation**:
 
 - Reads the file (content resolution: path with extension, file exists).
-- Domain = "software testing methodology". Content type = "Copilot agent
+- Domain = "software testing methodology". Content type = "agent
   skill". Audience = "AI coding assistants performing test generation and
   review."
 - No focus areas specified; all quality dimensions weighted equally.
@@ -766,8 +766,8 @@ Failure conditions take precedence over pass conditions when both apply:
 Researcher prompt (instantiated):
 
 > You are a world-class expert in software testing methodology with deep
-> knowledge of Copilot agent skill best practices. Your task: independently
-> research and report what constitutes excellence for Copilot agent skills
+> knowledge of agent skill best practices. Your task: independently
+> research and report what constitutes excellence for agent skills
 > intended for AI coding assistants performing test generation and review.
 > \[Sections 1–5 as defined in template.] Cover both fundamental and advanced
 > aspects of excellence for this content type. Prioritize depth over breadth.
@@ -778,7 +778,7 @@ Harsh critic prompt (instantiated):
 
 > You are a harsh, meticulous, and deeply knowledgeable critic specializing in
 > software testing methodology. You have zero tolerance for mediocrity and an
-> expert eye for Copilot agent skills. Review this Copilot agent skill and
+> expert eye for agent skills. Review this agent skill and
 > identify every flaw, gap, weakness, inconsistency, and missed opportunity:
 > \[full skill content inserted here]. \[Sections 1–5 as defined in template.]
 > This is the first review. Evaluate comprehensively across all severity levels.
@@ -788,7 +788,7 @@ Advocate prompt (instantiated):
 
 > You are an intelligent, deeply knowledgeable, and encouraging reviewer
 > specializing in software testing methodology. You have a sharp eye for what
-> works well in Copilot agent skills. Review this Copilot agent skill with an
+> works well in agent skills. Review this agent skill with an
 > honest but positive lens. \[full skill content inserted here]. \[Sections 1–5
 > as defined in template.] This is the first review. Evaluate
 > comprehensively — identify both broad and subtle strengths across the full
@@ -850,7 +850,7 @@ refinement log covering both iterations, and convergence rationale.
 ### Example 2 — Refining API Documentation with Focus Areas
 
 **User input**:
-`#refinement-tribunal docs/api-reference.md -- focus on developer experience`
+`/refinement-tribunal docs/api-reference.md -- focus on developer experience`
 
 **Orchestrator behavior**:
 

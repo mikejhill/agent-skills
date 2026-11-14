@@ -42,11 +42,14 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 | Screenshot blank/hangs on a background tab | `send Target.activateTarget -p targetId=ID` first. |
 | `CDP error -32000 ... Not allowed` | Some methods are blocked on `chrome://`/`edge://` pages and extension pages. |
 | PowerShell breaks JSON args | Use `-p key=value` or `@params.json`. |
+| `click`/`wait` returns `"timeout": "page still busy"` | The page polls or animates constantly. Use `--for-text`/`--for-selector` with `--no-settle`, or lower `--timeout`. |
+| `text` is empty or misses content | Cross-origin iframe: `targets --all`, then `text -t <iframe id>`. Hidden content needs `--hidden`. |
+| `a broker is already running for ...` | `--port`/`--browser` differ from the running broker's. `stop` first. |
 
 ## Broker internals
 
-- State: `%LOCALAPPDATA%\browser-devtools\broker.json` (Windows), `~/Library/Caches/browser-devtools`
-  (macOS), `~/.cache/browser-devtools` (Linux): port, random token, pid. Log: `broker.log` there.
+- State: `%LOCALAPPDATA%\browser-control\broker.json` (Windows), `~/Library/Caches/browser-control`
+  (macOS), `~/.cache/browser-control` (Linux): port, random token, pid. Log: `broker.log` there.
 - Listens on `127.0.0.1` random port; every request must carry the token from the
   state file (other local users can't drive the browser).
 - Windows: spawned with `pythonw.exe` + `CREATE_NO_WINDOW | DETACHED_PROCESS`, so no console
@@ -54,5 +57,7 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 - Exits on: `stop`, idle timeout (default 900 s since the last CLI request), browser
   disconnect, or failed connect. It removes its state file on exit.
 - One broker per user. To switch browsers: `stop`, then `--browser other start`.
+- `BROWSER_CONTROL_HOME=DIR` moves the state directory (isolated brokers for tests;
+  `tests/smoke_test.py` uses it so it never touches the user's broker).
 - Stuck process (rare): find the pid in `broker.json` and kill it (`taskkill /PID n /F`,
   `kill n`), then delete `broker.json`.

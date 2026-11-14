@@ -1,7 +1,7 @@
 # Intent Files
 
 Intent files record the operator's goals, priorities, and decision history
-for a Copilot feature. They serve as governance documents for feature
+for an agent feature (skill, instructions, agent, prompt, or hook). They serve as governance documents for feature
 creation, regeneration, and ongoing maintenance.
 
 ## Purpose
@@ -21,10 +21,10 @@ Intent files are for:
 
 - **Human operators** reviewing or updating their features.
 - **Agents creating or maintaining features** (e.g., via the
-  `copilot-features` skill or refinement workflows).
+  `writing-ai-instructions` skill or refinement workflows).
 
-Intent files are NOT for agents consuming the feature. An agent invoking
-`#python-development` does not need the python-development intent file.
+Intent files are NOT for agents consuming the feature. An agent using the
+python-development skill does not need the python-development intent file.
 
 ## File Placement
 

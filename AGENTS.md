@@ -11,11 +11,12 @@ This repository is a feature library for other workspaces, not a project workspa
 | Agents             | `agents/`                  | `<name>.agent.md`                 |
 | Prompts            | `prompts/`                 | `<name>.prompt.md`                |
 | Resources          | `resources/`               | `<name>.md`                       |
-| Intent files       | Alongside the feature      | `INTENT.md`                       |
+| Intent files       | Alongside the feature      | `INTENT.md` ([format](resources/intent-files.md)) |
 
 ## Rules
 
 - Names are lowercase and hyphen-separated.
+- Content is harness-neutral: no tool names, invocation syntax (`#tool:`, `#file:`), or paths specific to one harness. Use the portable Agent Skills format.
 - Content must be public-safe: no credentials, private hostnames, personal account data, or machine-specific absolute paths. Personal or private items belong in the separate private library.
 - Run `npx markdownlint-cli2` before committing Markdown.
 - After changes, run `skillsinc plan` and review the result before `skillsinc sync`.

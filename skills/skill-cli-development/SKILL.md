@@ -1,6 +1,6 @@
 ---
 name: skill-cli-development
-description: "Use when creating, modifying, or reviewing CLI tools bundled with agent skills. Covers when to build a CLI vs. use third-party tools, domain boundary design, language selection (Python preferred, Node.js when required), complexity tiers (lightweight single-file vs. standard full-project), cross-platform configuration and credential storage under ~/.config/copilot-skills/, agent security boundaries, dependency and size management, testing, and maintainability standards."
+description: "Use when creating, modifying, or reviewing CLI tools bundled with agent skills. Covers when to build a CLI vs. use third-party tools, domain boundary design, language selection (Python preferred, Node.js when required), complexity tiers (lightweight single-file vs. standard full-project), cross-platform configuration and credential storage under ~/.config/agent-skills/, agent security boundaries, dependency and size management, testing, and maintainability standards."
 ---
 
 # Skill CLI Development
@@ -248,7 +248,7 @@ Global or tool-level installation (`uv tool install`, `pip install`, `npm instal
 All skill CLI configuration lives under a unified directory:
 
 ```text
-~/.config/copilot-skills/<skill-name>/
+~/.config/agent-skills/<skill-name>/
 ├── config.toml                   # User preferences and settings
 └── credentials.toml              # API keys, tokens, secrets (mode 600)
 ```
@@ -267,7 +267,7 @@ import os
 
 def config_dir(skill_name: str) -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "copilot-skills" / skill_name
+    return base / "agent-skills" / skill_name
 ```
 
 **Node.js:**
@@ -278,7 +278,7 @@ import { homedir } from "node:os";
 
 function configDir(skillName: string): string {
   const base = process.env["XDG_CONFIG_HOME"] ?? join(homedir(), ".config");
-  return join(base, "copilot-skills", skillName);
+  return join(base, "agent-skills", skillName);
 }
 ```
 
@@ -305,7 +305,7 @@ Agents must interact with credentials **only through CLIs**, never by reading cr
 1. **File permissions.** Set `600` (owner read/write only) on `credentials.toml` immediately after creation. On Windows, restrict the NTFS ACL to the current user.
 2. **CLI design.** The CLI reads credentials internally and exposes only operation results. Credentials never appear in CLI output, logs, or error messages.
 3. **Skill instructions.** The SKILL.md must explicitly instruct agents to use the CLI for authenticated operations and to never read, write, or reference credential files.
-4. **Agent hooks (optional).** For high-security environments, deploy a `PreToolUse` hook that blocks file reads matching `**/credentials.toml` or `**/copilot-skills/*/credentials.*`.
+4. **Agent hooks (optional).** For high-security environments, deploy a `PreToolUse` hook that blocks file reads matching `**/credentials.toml` or `**/agent-skills/*/credentials.*`.
 
 ### Credential Setup
 
@@ -359,7 +359,7 @@ Skills may be replicated across many repositories. Minimize disk footprint.
 - Choose a complexity tier (Lightweight or Standard) before writing any code.
 - Graduate to Standard immediately when any graduation threshold is crossed.
 - Follow the language-specific skill conventions for the chosen language.
-- Store configuration under `~/.config/copilot-skills/<skill-name>/`.
+- Store configuration under `~/.config/agent-skills/<skill-name>/`.
 - Set file permissions (`600`) on credential files immediately after creation.
 - Include `--help` output documenting all parameters with examples.
 - Use exit code `0` for success, non-zero for errors.

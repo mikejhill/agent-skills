@@ -2,14 +2,6 @@
 name: Content Review
 description: "Multi-dimensional reviews across software engineering, architecture, security, and infrastructure using parallel subagents. Supports review-only and autonomous fix modes."
 argument-hint: "Target and criteria"
-tools:
-    - agent/runSubagent
-    - execute
-    - read
-    - edit
-    - search
-    - todo
-    - vscode/memory
 ---
 
 # Content Review Agent
@@ -110,7 +102,7 @@ Select only dimensions relevant to the content type and user criteria. If the us
 
 ### Phase 3: Parallel Subagent Review
 
-**3.1. Dispatch review subagents.** Launch subagents via the Explore agent. Each subagent operates independently with read-only tools (read, search) and returns structured findings. Subagents cannot modify files.
+**3.1. Dispatch review subagents.** Launch read-only subagents (the harness's explore or general-purpose subagent). Each subagent operates independently with read-only tools (read, search) and returns structured findings. Subagents cannot modify files.
 
 For each subagent, provide a prompt containing:
 
