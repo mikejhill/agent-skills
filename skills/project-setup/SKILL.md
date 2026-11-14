@@ -33,7 +33,7 @@ Build the smallest maintainable project that its users can discover, run, test, 
 - Treat crashed, incomplete, missing, or invalid mutation results as separate execution failures. Never infer a passing score or classify them as score findings. If the threshold is undefined, report the configuration gap instead of inventing one.
 - Version released behavior consistently and record user-visible changes. Identify the source revision, build inputs, and produced artifacts.
 - Build artifacts reproducibly where practical. Verify installation and essential behavior of the actual distributable before publication; test-only source runs do not verify the package.
-- Automate versioned releases from verified source and artifacts without adding manual approval gates by default. Separate release creation from deployment; preserve explicitly required approvals and the established release scheme.
+- Automate versioned releases from verified source and artifacts without adding manual approval gates by default. When release or bot workflows open PRs, configure the host so automation can open them and their required checks run; nobody should open bot PRs by hand. Separate release creation from deployment; preserve explicitly required approvals and the established release scheme.
 - Prefer short-lived, narrowly scoped publishing identity, verifiable build provenance, and least-privilege jobs. Isolate sensitive permissions from untrusted changes; retain rollback and artifact-integrity controls. Profiles supply registry and host details.
 
 ## Extend deliberately
