@@ -8,10 +8,13 @@ per command. Every CLI call talks to the broker over a token-protected localhost
     browser.py status                      endpoint detection + broker state
     browser.py start [--idle 900]          start broker (other commands auto-start it)
     browser.py stop                        stop broker (closes the WebSocket)
-    browser.py targets [--all]             list tabs (id, type, title, url)
+    browser.py targets [--all] [--grep S] [--focus]   list tabs (id, type, title, url)
+    browser.py which -t TARGET             show which tab TARGET resolves to
+    browser.py activate -t TARGET          bring a tab to the front
+    browser.py close -t TARGET             close a tab
     browser.py send METHOD [JSON] [-p k=v] [-t TARGET]   raw CDP command
     browser.py eval EXPR -t TARGET         Runtime.evaluate (returnByValue, awaitPromise)
-    browser.py open URL                    new tab, prints targetId
+    browser.py open URL [--reuse]          new tab (or an existing tab already at URL)
     browser.py nav URL -t TARGET           navigate and wait for load
     browser.py click SELECTOR -t TARGET    trusted mouse click at element center
     browser.py type TEXT -t TARGET [-s SELECTOR] [--replace]
@@ -23,8 +26,11 @@ per command. Every CLI call talks to the broker over a token-protected localhost
     browser.py batch FILE|-                JSON lines: {"method":..,"params":..,"target":..}
     browser.py enable-help [--launch]      how to turn on remote debugging
 
-TARGET = targetId (or unique prefix), or a case-insensitive substring of the tab's URL or
-title. Browser-level methods (Target.*, Browser.*, SystemInfo.*, Storage.*) need no target.
+TARGET selects one of the user's open tabs: targetId (or unique prefix); `active` (the tab
+in front); `url:SUBSTR` / `title:SUBSTR`; or a URL, host or case-insensitive substring of
+the tab's URL or title, best match first (exact URL > URL prefix or host > URL substring >
+title substring). Browser-level methods (Target.*, Browser.*, SystemInfo.*, Storage.*)
+need no target.
 """
 import argparse
 import base64
@@ -384,6 +390,45 @@ class WebSocket:
             pass
 
 
+# ------------------------------------------------------------------------- tab matching
+
+def norm_url(u):
+    u = u.strip().lower()
+    for pre in ("https://", "http://"):
+        if u.startswith(pre):
+            u = u[len(pre):]
+            break
+    if u.startswith("www."):
+        u = u[4:]
+    return u.rstrip("/")
+
+
+def match_rank(s, t):
+    """Rank how well selector s (lowercased) matches tab t; lower is better, None = no match.
+    0 exact URL, 1 URL prefix or host, 2 URL substring, 3 title substring."""
+    url, title = t.get("url", ""), t.get("title", "").lower()
+    if s.startswith("url:"):
+        return 2 if s[4:] and s[4:] in url.lower() else None
+    if s.startswith("title:"):
+        return 3 if s[6:] and s[6:] in title else None
+    nu, ns = norm_url(url), norm_url(s)
+    host = nu.split("/", 1)[0]
+    if ns and nu == ns:
+        return 0
+    if ns and ("/" in ns or "." in ns) and (nu.startswith(ns) or host == ns or host.endswith("." + ns)):
+        return 1
+    if s in url.lower():
+        return 2
+    if s in title:
+        return 3
+    return None
+
+
+def cands(ts):
+    return "; ".join("%s %s (%s)" % (t["targetId"][:8], t.get("url", "")[:70], t.get("title", "")[:40])
+                     for t in ts[:8])
+
+
 # ------------------------------------------------------------------------- broker
 
 class Broker:
@@ -497,26 +542,88 @@ class Broker:
         r = self.call("Target.getTargets")
         return r.get("result", {}).get("targetInfos", []) if "result" in r else []
 
+    def probe_focus(self, pages, keep=None):
+        """{targetId: {visible, focused}} for page tabs. Tabs attached only for the probe are
+        detached again, except `keep(targetId, state)` -> True ones."""
+        res, fresh = {}, {}
+
+        def one(t):
+            tid = t["targetId"]
+            sid = self.sessions.get(tid)
+            if not sid:
+                r = self.call("Target.attachToTarget", {"targetId": tid, "flatten": True}, timeout=3)
+                if "error" in r:
+                    return
+                sid = r["result"]["sessionId"]
+                fresh[tid] = sid
+            r = self.call("Runtime.evaluate", {"expression": "[document.visibilityState, document.hasFocus()]",
+                                               "returnByValue": True}, sid, timeout=2)
+            v = r.get("result", {}).get("result", {}).get("value")
+            if isinstance(v, list) and len(v) == 2:
+                res[tid] = {"visible": v[0] == "visible", "focused": bool(v[1])}
+
+        ths = [threading.Thread(target=one, args=(t,), daemon=True) for t in pages]
+        for th in ths:
+            th.start()
+        end = time.time() + 6
+        for th in ths:
+            th.join(max(0, end - time.time()))
+        kept = keep(res) if keep else None
+        for tid, sid in list(fresh.items()):
+            if tid == kept and tid not in self.sessions:
+                self.sessions[tid], self.sess_target[sid] = sid, tid
+            else:  # leave tabs we only peeked at as they were
+                self.call("Target.detachFromTarget", {"sessionId": sid}, timeout=0)
+        return res
+
+    def active(self, ts):
+        pages = [t for t in ts if t.get("type") == "page" and not t.get("url", "").startswith("devtools://")]
+        pick = {}
+
+        def choose(st):
+            foc = [t for t in pages if st.get(t["targetId"], {}).get("focused")]
+            vis = [t for t in pages if st.get(t["targetId"], {}).get("visible")]
+            pick["t"] = foc[0] if len(foc) == 1 else vis[0] if len(vis) == 1 else None
+            pick["vis"] = vis
+            return pick["t"]["targetId"] if pick["t"] else None
+
+        self.probe_focus(pages, choose)
+        if pick["t"]:
+            return pick["t"]
+        if not pick["vis"]:
+            raise ValueError("no visible tab found (browser minimized?); pick one from `browser.py targets`")
+        raise ValueError("'active' is ambiguous: %d windows each show a tab: %s" % (len(pick["vis"]), cands(pick["vis"])))
+
     def resolve(self, spec):
-        """targetId / prefix / url-or-title substring -> targetInfo (pages first)."""
+        """Tab selector -> targetInfo. See TARGET in the module docstring."""
         ts = self.targets()
         if not ts:
             raise ValueError("no targets (is the broker connected?)")
         for t in ts:
             if t["targetId"] == spec:
                 return t
-        s = spec.lower()
+        s = spec.strip().lower()
+        if s in ("active", "@active", "current", "."):
+            return self.active(ts)
         pref = [t for t in ts if t["targetId"].lower().startswith(s)]
         if len(pref) == 1:
             return pref[0]
-        sub = [t for t in ts if s in t.get("url", "").lower() or s in t.get("title", "").lower()]
-        pages = [t for t in sub if t.get("type") == "page"] or sub
-        if len(pages) == 1:
-            return pages[0]
-        if not pages:
-            raise ValueError("no target matches %r; run `browser.py targets`" % spec)
-        raise ValueError("%r is ambiguous (%d matches): %s" % (spec, len(pages), ", ".join(
-            "%s %s" % (t["targetId"][:8], t.get("url", "")[:60]) for t in pages[:6])))
+        best, ranked = None, []
+        for t in ts:
+            r = match_rank(s, t)
+            if r is None:
+                continue
+            r = (r, 0 if t.get("type") == "page" else 1)
+            if best is None or r < best:
+                best, ranked = r, [t]
+            elif r == best:
+                ranked.append(t)
+        if len(ranked) == 1:
+            return ranked[0]
+        if not ranked:
+            raise ValueError("no tab matches %r; run `browser.py targets`" % spec)
+        raise ValueError("%r is ambiguous (%d tabs): %s. Use an id, a fuller URL, url:/title:, or "
+                         "`active`" % (spec, len(ranked), cands(ranked)))
 
     def session_for(self, spec):
         with self.attach_lock:
@@ -571,6 +678,11 @@ class Broker:
         if op == "resolve":
             tid, sid = self.session_for(req["target"])
             return {"targetId": tid, "sessionId": sid}
+        if op == "which":
+            return {"target": self.resolve(req["target"])}
+        if op == "focus":
+            ts = [t for t in self.targets() if t.get("type") == "page"]
+            return {"focus": self.probe_focus(ts)}
         if op == "events":
             return self.get_events(req)
         return {"error": {"message": "unknown op %r" % op}}
@@ -959,13 +1071,41 @@ def cmd_stop(args):
     out({"stopped": True}, args)
 
 
+def tab_row(t):
+    return {"id": t["targetId"], "type": t["type"], "title": t.get("title", "")[:80],
+            "url": t.get("url", "")[:200]}
+
+
 def cmd_targets(args):
     st = ensure_broker(args, quiet=True)
     ts = rpc({"op": "targets"}, st)["targets"]
     if not args.all:
         ts = [t for t in ts if t.get("type") == "page"]
-    out([{"id": t["targetId"], "type": t["type"], "title": t.get("title", "")[:80],
-          "url": t.get("url", "")[:200], "attached": t.get("attached")} for t in ts], args)
+    if args.grep:
+        g = args.grep.lower()
+        ts = [t for t in ts if g in t.get("url", "").lower() or g in t.get("title", "").lower()]
+    rows = [tab_row(t) for t in ts]
+    if args.focus:
+        f = check(rpc({"op": "focus"}, st))["focus"]
+        for row in rows:
+            row.update(f.get(row["id"], {}))
+    out(rows, args)
+
+
+def cmd_which(args):
+    out(tab_row(check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]), args)
+
+
+def cmd_activate(args):
+    t = check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]
+    check(send(args, "Target.activateTarget", {"targetId": t["targetId"]}))
+    out(tab_row(t), args)
+
+
+def cmd_close(args):
+    t = check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]
+    check(send(args, "Target.closeTarget", {"targetId": t["targetId"]}))
+    out({"closed": t["targetId"], "url": t.get("url", "")}, args)
 
 
 def cmd_send(args):
@@ -1024,6 +1164,16 @@ def cmd_eval(args):
 
 
 def cmd_open(args):
+    if args.reuse:  # an existing tab already at this URL (exact, or URL prefix / host)
+        st = broker(args)
+        s = args.url.strip().lower()
+        hits = sorted((r, t["targetId"], t) for t in rpc({"op": "targets"}, st)["targets"]
+                      if t.get("type") == "page" for r in [match_rank(s, t)] if r is not None and r <= 1)
+        if hits:
+            t = hits[0][2]
+            if not args.background:
+                check(send(args, "Target.activateTarget", {"targetId": t["targetId"]}))
+            return out({"targetId": t["targetId"], "reused": True, "url": t.get("url", "")}, args)
     r = check(send(args, "Target.createTarget", {"url": args.url, "background": args.background}))
     out(r, args)
 
@@ -1208,7 +1358,7 @@ def cmd_body(args):
 
 
 TARGETED = {"send", "eval", "nav", "click", "type", "key", "screenshot", "pdf", "events", "text",
-            "wait", "net", "body", "batch"}
+            "wait", "net", "body", "batch", "which", "activate", "close"}
 
 
 def cmd_run(args):
@@ -1222,6 +1372,8 @@ def cmd_run(args):
     for flag in ("browser", "port"):
         if getattr(args, flag, None):
             glob += ["--" + flag, str(getattr(args, flag))]
+    if args.target:  # pin the tab once: a URL selector may stop matching after a nav step
+        args.target = check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]["targetId"]
     rc = 0
     for i, line in enumerate(steps, 1):
         toks = shlex.split(line, posix=True)
@@ -1372,14 +1524,22 @@ def main(argv=None, nested=False):
 
     def tgt(p, required=False):
         p.add_argument("-t", "--target", required=required,
-                       help="targetId, id prefix, or URL/title substring")
+                       help="tab: id or prefix, active, url:S, title:S, URL, host, or URL/title substring")
 
     sub.add_parser("status").set_defaults(fn=cmd_status)
     p = sub.add_parser("start"); p.add_argument("--idle", type=int, default=DEFAULT_IDLE,
                                                 help="exit after N idle seconds (default 900)")
     p.set_defaults(fn=cmd_start)
     sub.add_parser("stop").set_defaults(fn=cmd_stop)
-    p = sub.add_parser("targets"); p.add_argument("--all", action="store_true"); p.set_defaults(fn=cmd_targets)
+    p = sub.add_parser("targets", help="list open tabs")
+    p.add_argument("--all", action="store_true", help="include workers, iframes, extensions")
+    p.add_argument("--grep", metavar="SUBSTR", help="only tabs whose URL or title contains SUBSTR")
+    p.add_argument("--focus", action="store_true", help="add visible/focused per tab (attaches briefly)")
+    p.set_defaults(fn=cmd_targets)
+    p = sub.add_parser("which", help="show the tab a -t selector resolves to"); tgt(p, True)
+    p.set_defaults(fn=cmd_which)
+    p = sub.add_parser("activate", help="bring a tab to the front"); tgt(p, True); p.set_defaults(fn=cmd_activate)
+    p = sub.add_parser("close", help="close a tab"); tgt(p, True); p.set_defaults(fn=cmd_close)
     p = sub.add_parser("send"); p.add_argument("method"); p.add_argument("params", nargs="?",
                                                                          help="JSON, @file.json, or - for stdin")
     p.add_argument("-p", action="append", metavar="KEY=VALUE", help="param (repeatable; dotted keys; JSON values)")
@@ -1391,6 +1551,7 @@ def main(argv=None, nested=False):
     p.add_argument("--no-helpers", action="store_true", help="skip defining the __dt helper library")
     p.set_defaults(fn=cmd_eval)
     p = sub.add_parser("open"); p.add_argument("url"); p.add_argument("--background", action="store_true")
+    p.add_argument("--reuse", action="store_true", help="use an open tab already at URL (exact/prefix/host)")
     p.set_defaults(fn=cmd_open)
     p = sub.add_parser("nav"); p.add_argument("url"); tgt(p, True)
     p.add_argument("--no-wait", action="store_true", help="return right after Page.navigate")

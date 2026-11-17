@@ -136,9 +136,13 @@ C send Network.emulateNetworkConditions -p offline=false -p latency=200 -p downl
 ## Tabs
 
 ```
+C targets --grep github                            # the user's open tabs matching "github"
+C which -t https://github.com/                     # exact URL → id; ambiguity lists candidates
+C which -t active                                  # tab in front
+C open https://example.com --reuse                 # existing tab at that URL/host, else new
 C open https://example.com --background           # → targetId
-C send Target.activateTarget -p targetId=ID        # focus tab
-C send Target.closeTarget -p targetId=ID
+C activate -t ID                                   # focus tab
+C close -t ID
 ```
 
 ## Files
