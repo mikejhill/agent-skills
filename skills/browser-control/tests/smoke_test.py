@@ -150,6 +150,12 @@ def main():
         code, o, e = r.cli("activate", "-t", tid2)
         code, o, e = r.cli("eval", "location.hash", "-t", "active")
         r.check("activate + eval -t active", code == 0 and json.loads(o) == "#items", o + e)
+        code, o, e = r.cli("send", "Target.createTarget", "-p", "url=about:blank", "-p", "newWindow=true")
+        win2 = json.loads(o)["targetId"]
+        code, o, e = r.cli("activate", "-t", tid2)
+        code, o, e = r.cli("which", "-t", "active")
+        r.check("-t active with two windows: last activated wins", code == 0 and json.loads(o)["id"] == tid2, o + e)
+        r.cli("close", "-t", win2)
         code, o, e = r.cli("open", base + "?second#items", "--reuse")
         r.check("open --reuse returns the existing tab", code == 0 and json.loads(o).get("reused")
                 and json.loads(o)["targetId"] == tid2, o + e)
@@ -159,6 +165,11 @@ def main():
         code, o, e = r.cli("close", "-t", tid2)
         code2, o2, e2 = r.cli("targets", "--grep", "127.0.0.1")
         r.check("close", code == 0 and tid2 not in o2, o + e + o2)
+        code, o, e = r.cli("eval", "document.body.insertAdjacentHTML('beforeend', "
+                           "'<div class=skeleton style=\"width:50px;height:9px\"></div>')", "-t", tid)
+        code, o, e = r.cli("wait", "-t", tid, "--timeout", "8")
+        w = json.loads(o) if code == 0 else {}
+        r.check("a placeholder that never goes away stops blocking settle", w.get("ok") and w["waited"] < 5, o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
         r.cli("stop")

@@ -57,7 +57,7 @@ INFLIGHT_SKIP = {"WebSocket", "EventSource", "Ping", "Media", "Manifest", "Prefe
 # In-page helper library, (re)defined idempotently before every eval, so it survives
 # navigations and SPA reloads with no separate injection step. Everything pierces open
 # shadow roots and same-origin iframes. Exposed to `eval` code as `__dt`.
-DT_VERSION = 2
+DT_VERSION = 3
 DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG']);
   const CLICKABLE = 'a,button,summary,label,select,option,input[type=button],input[type=submit],' +
@@ -160,10 +160,15 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
     '[class*=loader i],[class*=skeleton i]';
   // Page signature for settle-waits. A visible spinner or "Loading..." makes every poll
   // unique, so the page never looks quiet while one shows (e.g. a timer fetches later).
+  // An indicator that stays put for STUCK ms is decoration (GitHub keeps skeleton
+  // placeholders on screen), so it stops counting as busy.
+  const STUCK = 3000, seenEl = new WeakMap(), seenTx = new Map();
+  const fresh = (m, k) => { const n = Date.now(); if (!m.has(k)) m.set(k, n); return n - m.get(k) < STUCK; };
   const sig = () => {
     const t = deepText();
-    const busy = /(^|\n)[^\n]{0,30}\b(loading|please wait)\b/i.test(t) ||
-      qsa(BUSY).some(e => vis(e) && e.getBoundingClientRect().width > 0);
+    const line = (t.match(/(^|\n)[^\n]{0,30}\b(loading|please wait)\b[^\n]*/i) || [])[0];
+    const busy = (line && fresh(seenTx, line + '|' + location.href)) ||
+      qsa(BUSY).filter(e => vis(e) && e.getBoundingClientRect().width > 0).map(e => fresh(seenEl, e)).includes(true);
     return busy ? 'busy:' + Math.random() :
       location.href + '|' + t.length + '|' + performance.getEntriesByType('resource').length;
   };
@@ -446,6 +451,7 @@ class Broker:
         self.inflight = {}  # sessionId -> {requestId: start time}, once Network is enabled
         self.net_on = set()  # sessionIds with Network.enable sent by the broker or a client
         self.attach_lock = threading.Lock()
+        self.last_activated = None  # targetId of the last Target.activateTarget sent
         self.last_activity = time.time()
         self.stopping = threading.Event()
         self.state = "connecting"
@@ -583,8 +589,10 @@ class Broker:
         def choose(st):
             foc = [t for t in pages if st.get(t["targetId"], {}).get("focused")]
             vis = [t for t in pages if st.get(t["targetId"], {}).get("visible")]
-            pick["t"] = foc[0] if len(foc) == 1 else vis[0] if len(vis) == 1 else None
-            pick["vis"] = vis
+            pool = foc or vis  # focused window's tab; else each window's front tab
+            last = [t for t in pool if t["targetId"] == self.last_activated]
+            pick["t"] = pool[0] if len(pool) == 1 else last[0] if last else None
+            pick["vis"] = pool
             return pick["t"]["targetId"] if pick["t"] else None
 
         self.probe_focus(pages, choose)
@@ -592,7 +600,8 @@ class Broker:
             return pick["t"]
         if not pick["vis"]:
             raise ValueError("no visible tab found (browser minimized?); pick one from `browser.py targets`")
-        raise ValueError("'active' is ambiguous: %d windows each show a tab: %s" % (len(pick["vis"]), cands(pick["vis"])))
+        raise ValueError("'active' is ambiguous: %d browser windows each show a tab: %s. "
+                         "Use one of these ids, or `activate -t ID` first" % (len(pick["vis"]), cands(pick["vis"])))
 
     def resolve(self, spec):
         """Tab selector -> targetInfo. See TARGET in the module docstring."""
@@ -661,6 +670,8 @@ class Broker:
                 self.call(req["method"], req.get("params"), sess, 0)
                 return {}
             r = self.call(req["method"], req.get("params"), sess, req.get("timeout", 30))
+            if req["method"] == "Target.activateTarget" and "error" not in r:
+                self.last_activated = (req.get("params") or {}).get("targetId")
             if sess and "error" not in r and req["method"] in ("Network.enable", "Network.disable"):
                 (self.net_on.add if req["method"] == "Network.enable" else self.net_on.discard)(sess)
                 self.inflight.pop(sess, None)

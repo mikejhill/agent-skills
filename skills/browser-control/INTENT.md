@@ -40,3 +40,8 @@ the purpose.
   candidates; `which`, `activate`, `close`, `targets --grep/--focus`, `open --reuse`;
   `run -t` pins the tab before steps that navigate. SKILL.md now tells agents to drive a
   tab the user names. Smoke test runs as root (`--no-sandbox`).
+- 2026-11-17: [agent] Fixes from the first real run on Edge. `nav` on GitHub always hit the
+  15 s timeout: a skeleton placeholder stays visible forever, so settle never passed. Busy
+  indicators now count only while new (3 s), and GitHub navs settle in about 3.6 s. `-t active`
+  failed with two Edge windows open (neither focused while the user is in another app); it
+  now falls back to the tab last brought forward with `activate`.

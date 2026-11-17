@@ -50,7 +50,7 @@ opened first. `-t` selectors, best match first:
 
 | Selector | Matches |
 |---|---|
-| `active` | The tab in front (focused window, else the only visible tab) |
+| `active` | The tab in front: focused window's tab, else the only visible one; with several windows, the tab last brought forward with `activate` |
 | `https://github.com/` | Exact URL (scheme, `www.` and trailing `/` ignored) |
 | `github.com`, `github.com/org/repo` | Host (incl. subdomains) or URL prefix |
 | `github` | Substring of URL, then of title |
@@ -76,7 +76,7 @@ browser.py text -t 3F2A --max 3000
 Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 
 - **Never `sleep`.** `click`, `nav` and `wait` block until the page settles: no in-flight
-  XHR/fetch, no visible spinner or "Loading...", and URL + visible text unchanged for
+  XHR/fetch, no visible spinner or "Loading..." (one stuck on screen for 3 s is ignored), and URL + visible text unchanged for
   `--quiet` (0.5 s). Add `--for-text`, `--for-selector`, `--for-gone` or `--for-url` to wait
   for a specific state. They return `"timeout"` instead of failing if the page never settles.
 - **Read with `text`, not `innerText`.** `text` pierces shadow DOM and same-origin iframes
