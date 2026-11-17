@@ -35,10 +35,41 @@ exit code 2 (3 = browser control not enabled).
 2. **Warn, then start:** tell the user *"Your browser will ask to allow remote debugging;
    click Allow"*, then run `browser.py start`. It blocks (up to 120 s) until they approve.
    Any command auto-starts the broker, but start explicitly so the prompt is expected.
-3. **Work:** `targets` → pick a tab (or `open` a new one) → act and read with `-t`
-   (see *Working fast*).
-4. **Stop:** `browser.py stop` when the task is done, including after errors. Don't leave it
+3. **Pick the tab:** when the user points at a tab they have open ("my GitHub tab", "the
+   page I'm on"), take over that tab: `which -t github.com` (or `-t active`) to confirm
+   the match, then use the returned `id`. Otherwise `open URL --reuse` (reuses a tab
+   already at that URL) or `open URL`. See *Existing tabs*.
+4. **Work:** act and read with `-t ID` (see *Working fast*).
+5. **Stop:** `browser.py stop` when the task is done, including after errors. Don't leave it
    to the idle timeout. Stopping removes the browser's "being controlled" banner.
+
+## Existing tabs
+
+Every targeted command works on any tab the user already has open; nothing needs to be
+opened first. `-t` selectors, best match first:
+
+| Selector | Matches |
+|---|---|
+| `active` | The tab in front (focused window, else the only visible tab) |
+| `https://github.com/` | Exact URL (scheme, `www.` and trailing `/` ignored) |
+| `github.com`, `github.com/org/repo` | Host (incl. subdomains) or URL prefix |
+| `github` | Substring of URL, then of title |
+| `url:/pull/`, `title:Inbox` | Substring of that field only |
+| `3F2A`, full id | Target id or unique prefix |
+
+Only the best-ranked group counts; if it holds several tabs the command fails and lists
+them (id, URL, title). Then use the id. `targets --grep S` filters the list,
+`targets --focus` adds `visible`/`focused` per tab.
+
+Resolve once, then work by id: a URL selector stops matching after the tab navigates.
+`run -t SELECTOR` pins the tab itself.
+
+```text
+browser.py which -t github.com           # → {"id": "3F2A...", "url": "https://github.com/", ...}
+browser.py activate -t 3F2A              # bring it to the front so the user can watch
+browser.py nav https://github.com/notifications -t 3F2A
+browser.py text -t 3F2A --max 3000
+```
 
 ## Working fast
 
@@ -80,8 +111,10 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 |---|---|
 | `status` | Detected browsers + broker state (never prompts) |
 | `start [--idle SEC]` / `stop` | Start / stop broker |
-| `targets [--all]` | Tabs: `id`, `title`, `url` (`--all` adds workers, iframes, extensions) |
-| `open URL [--background]` | New tab → `targetId` |
+| `targets [--all] [--grep S] [--focus]` | Tabs: `id`, `title`, `url` (`--all` adds workers, iframes, extensions) |
+| `which -t T` | The tab `T` resolves to (`id`, `title`, `url`); errors list candidates |
+| `activate -t T` / `close -t T` | Bring tab to front / close it |
+| `open URL [--background] [--reuse]` | New tab → `targetId`; `--reuse` returns an open tab at that URL/host instead |
 | `nav URL -t T [--no-wait] [WAIT]` | Navigate; waits for `load` (not for hash routes), then settles |
 | `click [CSS] [--text T] [--index N] [--within T] -t T [WAIT]` | Real click (falls back to DOM click if covered); settles |
 | `type TEXT -t T [-s SELECTOR] [--replace]` | Real text input into focused / selected element |
@@ -102,9 +135,8 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 `WAIT` = `--for-text T`, `--for-selector CSS`, `--for-gone T`, `--for-url S`, `--no-settle`,
 `--quiet SEC`, `--timeout SEC` (15), `--show [MARKER]` (print visible text after waiting).
 
-**Target (`-t`)**: full targetId, unique id prefix, or a case-insensitive substring of the
-tab's URL or title (`-t github`). Ambiguous matches error with candidates. Omit `-t` only
-for browser-wide commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).
+**Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
+commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).
 
 **Params**: `-p` avoids shell-quoting JSON (PowerShell mangles inline JSON). Values parse
 as JSON when possible (`*Id` keys stay strings unless integers), dotted keys nest:
@@ -114,9 +146,10 @@ Complex params: write a `.json` file and pass `@params.json`.
 ## Rules
 
 - **It's the user's real browser.** Prefer read-only work. Ask before submitting forms,
-  purchasing, sending messages, deleting, or changing settings. Prefer `open` for a new
-  tab over navigating a tab the user is using; close tabs you opened
-  (`send Target.closeTarget -p targetId=ID`).
+  purchasing, sending messages, deleting, or changing settings.
+- **Tabs:** drive a tab the user named or pointed to; that is the point of asking. Don't
+  navigate other tabs of theirs away from their page: `open` (or `open --reuse`) a tab for
+  your own work instead. Close only tabs you opened (`close -t ID`).
 - **Never print or store cookies, tokens or passwords** unless the user asked for them.
   Response bodies and headers can carry session tokens: save to a file and extract fields.
 - Act with `click` / `type` / `key` (real input events; work with React and `isTrusted`

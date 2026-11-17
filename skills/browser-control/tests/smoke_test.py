@@ -76,7 +76,9 @@ def main():
     procs = [subprocess.Popen([sys.executable, os.path.join(HERE, "fixture_server.py"), str(web)]),
              subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=%d" % cdp,
                                "--user-data-dir=" + os.path.join(tmp, "profile"), "--no-first-run",
-                               "--no-default-browser-check", "about:blank"],
+                               "--no-default-browser-check"]
+                             + (["--no-sandbox"] if getattr(os, "geteuid", lambda: 1)() == 0 else [])  # root (CI containers)
+                             + ["about:blank"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
     r = Runner(cdp, env)
     try:
@@ -130,6 +132,33 @@ def main():
         r.check("eval let redeclaration (replMode)", o.strip() == "1" and o2.strip() == "2", o + e + o2 + e2)
         code, o, e = r.cli("nav", "http://127.0.0.1:%d/#items" % web, "-t", tid, "--for-text", "Item G")
         r.check("nav hash route returns without load event", code == 0 and json.loads(o)["loaded"], o + e)
+        # existing tabs: select by URL / host / title / active, reuse, activate, close
+        base = "http://127.0.0.1:%d/" % web
+        code, o, e = r.cli("open", base + "?second#items")
+        tid2 = json.loads(o)["targetId"]
+        code, o, e = r.cli("activate", "-t", tid)
+        code, o, e = r.cli("which", "-t", base + "?second#items")
+        r.check("which: exact URL beats substring", code == 0 and json.loads(o)["id"] == tid2, o + e)
+        code, o, e = r.cli("which", "-t", "127.0.0.1")
+        r.check("which: ambiguous host lists candidates", code == 2 and "ambiguous" in e and tid2[:8] in e, o + e)
+        code, o, e = r.cli("targets", "--focus", "--grep", "127.0.0.1")
+        rows = json.loads(o) if code == 0 else []
+        r.check("targets --focus marks the front tab",
+                [x["id"] for x in rows if x.get("visible")] == [tid], o + e)
+        code, o, e = r.cli("which", "-t", "active")
+        r.check("-t active is the front tab", code == 0 and json.loads(o)["id"] == tid, o + e)
+        code, o, e = r.cli("activate", "-t", tid2)
+        code, o, e = r.cli("eval", "location.hash", "-t", "active")
+        r.check("activate + eval -t active", code == 0 and json.loads(o) == "#items", o + e)
+        code, o, e = r.cli("open", base + "?second#items", "--reuse")
+        r.check("open --reuse returns the existing tab", code == 0 and json.loads(o).get("reused")
+                and json.loads(o)["targetId"] == tid2, o + e)
+        code, o, e = r.cli("run", "-", "-t", base + "?second#items",
+                           stdin="nav %s#home --for-text Welcome\neval location.hash" % base)
+        r.check("run pins the tab across a nav that changes its URL", code == 0 and '"#home"' in o, o + e)
+        code, o, e = r.cli("close", "-t", tid2)
+        code2, o2, e2 = r.cli("targets", "--grep", "127.0.0.1")
+        r.check("close", code == 0 and tid2 not in o2, o + e + o2)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
         r.cli("stop")

@@ -34,3 +34,9 @@ the purpose.
 - 2026-11-14: [agent] Renamed `browser-devtools` → `browser-control` (script `browser.py`,
   state dir `browser-control`, env `BROWSER_CONTROL_HOME`). Reframed SKILL.md around controlling the browser for tasks;
   CDP moved to a "How it works" note.
+- 2026-11-17: [agent] Existing-tab control (Mike: "take over the GitHub tab I have open"
+  instead of opening new tabs). Ranked `-t` matching (exact URL > host/URL prefix > URL
+  substring > title), `active`, `url:`/`title:` selectors, ambiguity errors listing
+  candidates; `which`, `activate`, `close`, `targets --grep/--focus`, `open --reuse`;
+  `run -t` pins the tab before steps that navigate. SKILL.md now tells agents to drive a
+  tab the user names. Smoke test runs as root (`--no-sandbox`).
