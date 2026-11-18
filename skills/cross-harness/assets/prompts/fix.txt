@@ -1,0 +1,12 @@
+A code review of {{SCOPE}} produced the findings below. Fix them in this working tree.
+
+1. Check each finding against the code first. Fix only the findings that hold up. Skip any you can show are wrong, and say why.
+2. Keep each fix minimal and in the existing style. Don't refactor unrelated code.
+3. Run the relevant tests or checks if the project has them, and fix what your changes break.
+4. Do not commit, push, or post anything.
+
+End with a short report: what you fixed (with `path:line`), what you skipped and why, and the result of the tests you ran.
+
+Review:
+
+{{REVIEW}}
