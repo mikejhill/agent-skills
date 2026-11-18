@@ -7,7 +7,10 @@
 | Native (default) | Plain review, optionally with `--native-args` | `codex exec review --base/--commit/--uncommitted` with Codex's own sandbox config | `/code-review [native args] [--fix] [--comment] [target]` over stdin to `claude -p` |
 | Prompt | `--adversarial`, `--focus`, or `--no-native` (also Claude with `--commit`) | `codex exec -s read-only` with `assets/prompts/` | `claude -p` with the same prompt, read-only tools |
 
-The native mode follows each harness's own review behavior. It passes the
+The native mode follows each harness's own review behavior. Claude's native review
+runs with Bash allowed, because `/code-review` uses shell pipelines, and edit tools
+denied unless `--fix` is given. That isn't a hard read-only boundary. Use
+`--no-native` when the review must not be able to change anything. It passes the
 arguments in `--native-args` through verbatim (for example `"high"`, `"xhigh
 --max-findings all"`), so new review levels and flags work without changes here.
 The skill does not validate them. Codex's `exec review` takes scope flags only and

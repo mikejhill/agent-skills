@@ -41,7 +41,9 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
 - **Per-job state** in a user state home (`%LOCALAPPDATA%` or `XDG_STATE_HOME`),
   keyed by job id and recording owner, target directory, and pids. Never keyed by cwd.
 - **Native reviews by default** (user decision, 2026-11-18): the harness's reviewer runs
-  as designed, edits only with `--fix`, and posts only with `--post`. Tasks are
+  as designed. Edit tools are granted only with `--fix`, and posting happens only with
+  `--post`. Claude's native review gets unrestricted Bash (its pipelines need it), so it is
+  not a hard read-only guarantee; prompt reviews are. Tasks are
   read-only unless `--write`. No `--trust` or bypass flags.
 - **One nesting level** (`CROSS_HARNESS_DEPTH`), to stop ping-pong loops.
 
@@ -101,3 +103,6 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
   `gh pr comment` or `glab mr note`), and `--pr`. Fixed two races found by repeated
   test runs: a shared write-probe file, and a sweep overwriting a just-finished job.
   Only the supervisor writes `job.json` while it lives.
+- 2026-11-18: [agent] Windows retest at e7fb80d: smoke test 17/17 three times; live Claude
+  native review (`/code-review low feat`) and Codex native review with `--fix` (fix step ran
+  and reported; review found nothing to change).
