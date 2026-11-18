@@ -10,7 +10,7 @@
 The native mode follows each harness's own review behavior. Claude's native review
 runs with Bash allowed, because `/code-review` uses shell pipelines, and edit tools
 denied unless `--fix` is given. That isn't a hard read-only boundary. Use
-`--no-native` when the review must not be able to change anything. It passes the
+`--no-native` when the review must not be able to change anything. The skill passes the
 arguments in `--native-args` through verbatim (for example `"high"`, `"xhigh
 --max-findings all"`), so new review levels and flags work without changes here.
 The skill does not validate them. Codex's `exec review` takes scope flags only and
