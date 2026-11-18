@@ -1,37 +1,58 @@
 # Reviews
 
-## Choosing the scope
+## Modes
 
-| Want | Command |
+| Mode | When | Codex | Claude Code |
+|---|---|---|---|
+| Native (default) | Plain review, optionally with `--native-args` | `codex exec review --base/--commit/--uncommitted` with Codex's own sandbox config | `/code-review [native args] [--fix] [--comment] [target]` over stdin to `claude -p` |
+| Prompt | `--adversarial`, `--focus`, or `--no-native` (also Claude with `--commit`) | `codex exec -s read-only` with `assets/prompts/` | `claude -p` with the same prompt, read-only tools |
+
+The native mode follows each harness's own review behavior. It passes the
+arguments in `--native-args` through verbatim (for example `"high"`, `"xhigh
+--max-findings all"`), so new review levels and flags work without changes here.
+The skill does not validate them. Codex's `exec review` takes scope flags only and
+no custom instructions, so custom instructions need the prompt mode. Set
+`CROSS_HARNESS_CLAUDE_REVIEW_CMD` to use a different Claude command name (for
+example `/review`) if it is renamed.
+
+Verified on 2026-11-18 with codex-cli 0.159 and 0.170, and Claude Code 2.1.322
+and 2.1.327.
+
+## Scope
+
+| Want | Options |
 |---|---|
-| Branch or PR against its base | `xh.py review -t codex --base main` |
-| One commit | `xh.py review -t codex --commit abc123` |
-| Uncommitted work (staged, unstaged, untracked) | `xh.py review -t codex` |
-| Attack-minded pass | add `--adversarial` |
-| Steer the reviewer | add `--focus "concurrency in the cache layer"` |
-| A repository other than the current directory | add `--cwd PATH` |
+| A PR or MR | `--pr N`. It looks up the base with `gh` or `glab` and uses `origin/<base>` |
+| The current branch's PR or MR | `--post` alone finds it |
+| A branch against its base | `--base main` (for Claude native, the current branch is the target and `/code-review` picks its base) |
+| One commit | `--commit SHA` |
+| Uncommitted work | default, or `--uncommitted` |
+| A different repository | `--cwd PATH` |
 
-For a PR, check out its head branch (or a worktree of it) and review against the
-PR's base branch. Fetch the base first, so `--base origin/main` is current.
+For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
+current.
 
-## What runs
+## Fixing: `--fix`
 
-| Target | Plain review | `--focus` or `--adversarial` |
-|---|---|---|
-| Codex | `codex exec review --base/--commit/--uncommitted` (built-in reviewer, read-only sandbox, `--ephemeral`) | `codex exec -s read-only --ephemeral` with the prompt from `assets/prompts/` |
-| Claude Code | `claude -p --no-session-persistence` with the prompt from `assets/prompts/`, read-only tools (Read, Grep, Glob, read-only `git`), and edit tools denied | same |
+- Claude native: `/code-review --fix`. Claude applies the fixes it judges sound
+  inside its own review (edit permission is granted for this run).
+- Every other case: after a successful review, a second step runs the same target
+  with write access (`codex exec -s workspace-write`, or Claude with
+  `acceptEdits`). Its brief is `assets/prompts/fix.txt` plus the findings. The step
+  verifies each finding before fixing it, runs the tests, and never commits or
+  pushes. `xh.py result JOB --fix-report` prints its report.
 
-The reviewer reads the diff itself with `git`, so large diffs and untracked files never
-go through a command line or a prompt-size limit. Prompts go over stdin.
+Edits land in `--cwd`. Use a worktree when you don't want them mixed with your own work.
 
-`--isolate` keeps the reviewed checkout's own agent configuration out of the review
-where the CLI allows it: Claude Code loads only user settings (no project hooks or
-permissions), and Codex ignores execpolicy rules. Use it when reviewing a branch you
-do not trust. Instruction files (`CLAUDE.md`, `AGENTS.md`) are still read by both.
+## Posting: `--post`
 
-`--sandbox inherit` drops the read-only sandbox flag for Codex and uses the sandbox in
-your own `config.toml`. Use it when the forced sandbox fails on your platform, for
-example a Linux kernel that blocks unprivileged user namespaces.
+- Claude native: `/code-review --comment <pr>`. Claude posts in its own format.
+- Every other case: the skill posts one summary comment, the review plus the fix
+  report if there was one, with `gh pr comment` (GitHub) or `glab mr note` (GitLab).
+  The host comes from the `origin` remote. Set `CROSS_HARNESS_REVIEW_HOST` to
+  override it.
+- The poster's CLI must be installed and signed in. Posting is public and can't be
+  quietly undone, so post only when the user or their instructions ask for it.
 
 ## Handling findings
 
@@ -39,25 +60,21 @@ The reviewer's output is a claim, not a fact.
 
 1. Read every finding against the code. Confirm or refute it from the source, and
    run a test when that is cheap.
-2. Sort the findings into confirmed, refuted (with the reason), and unclear.
-3. Report all three groups to the user. Don't silently drop a finding you disagree
-   with. Say why it doesn't hold.
-4. Fix only what the user asked you to fix. "Review and fix" covers confirmed
-   findings. "Get a review" means report only.
-5. If the reviewer and you still disagree after checking, the user decides.
-
-A clean review ("No material findings") is weak evidence. Say what scope was reviewed,
-and don't present it as proof of correctness.
+2. Report confirmed, refuted (with the reason), and unclear findings to the user.
+   Don't drop a finding silently.
+3. If the review also fixed or posted, say what changed and where it was posted.
+4. A clean review is weak evidence. Name the scope that was reviewed, and don't
+   present it as proof of correctness.
 
 ## Recurring review instructions
 
-A user instruction such as "run a Codex adversarial review on every PR before marking
-it ready" means:
+An instruction such as "run a Codex review on every PR before marking it ready, and
+post it" means:
 
 ```text
-xh.py review -t codex --base <PR base> --adversarial --label "PR #<n>"
-xh.py wait <job> --timeout 90          # repeat while exit code is 3
+xh.py review -t codex --pr <n> --post --label "PR #<n>"
+xh.py wait <job> --timeout 90          # repeat while the exit code is 3
 ```
 
-Verify the findings, fix the confirmed ones if that is part of the instruction, then
-mark the PR ready and summarize the review in the PR or your reply.
+Then verify the findings, address the confirmed ones if the instruction says to, and
+mark the PR ready.

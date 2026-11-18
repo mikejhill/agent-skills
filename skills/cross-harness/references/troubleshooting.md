@@ -3,17 +3,17 @@
 ## Job failed
 
 `xh.py result JOB --json` shows `error`, `exit_code`, and `reason`. The raw output is in
-the job directory: `<state home>/jobs/<job>/stdout.log`, `stderr.log`, and `result.md`.
+the job directory: `<state home>/jobs/<job>/` holds `result.md`, `result.stdout.log`, and `result.stderr.log`, plus `fix.*` files when a fix step ran.
 
 | Symptom | Likely cause | Action |
 |---|---|---|
 | `not found on PATH` | CLI not installed, or not on this shell's PATH | Install it, or set `CROSS_HARNESS_<TARGET>_BIN` |
-| Auth error in `stderr.log` | Target signed out | User runs `codex login` or `claude` and signs in |
+| Auth error in `result.stderr.log` | Target signed out | User runs `codex login` or `claude` and signs in |
 | `cannot write the state home` | Caller's sandbox | Rerun with escalated permissions, or set `CROSS_HARNESS_HOME` |
 | Network or DNS errors (from Codex calling Claude) | Codex sandbox blocks network | Run `xh.py` with escalated permissions |
 | Sandbox errors from Codex (`bwrap`, `CreateProcessAsUserW`, `ACCESS_DENIED`) | Forced sandbox mode unsupported here | Retry with `--sandbox inherit` |
-| Model or effort rejected | Name not valid for this CLI version or account | Retry without `--model` or `--effort`, or with a valid one |
-| `succeeded` but thin result | Reviewer found nothing, or ran out of turns | Read `stdout.log`; narrow the scope with `--focus` |
+| Model or effort rejected (`model_not_found`, "not supported") | The target's configured default, or the name you passed, isn't available for this CLI version or account (for example an API-only model with a ChatGPT sign-in) | Retry with `--model` set to a model the account supports, or without `--effort`. Tell the user their default is unusable |
+| `succeeded` but thin result | Reviewer found nothing, or ran out of turns | Read `result.stdout.log`; narrow the scope with `--focus` |
 | `timed_out` | Job exceeded `--timeout` | Narrow the task, or raise `--timeout` |
 | `orphaned` | The calling session exited | Expected. Rerun from a live session, or use `--no-owner` |
 | `lost` | Supervisor was killed | The sweep already ended its processes; rerun |
@@ -50,3 +50,12 @@ kill -- -<pgid>    # or: pkill -f app-server-broker.mjs
 ```
 
 Uninstalling or disabling that plugin prevents new brokers.
+
+## Posting and PR lookup
+
+| Symptom | Action |
+|---|---|
+| `cannot tell the review host` | Set `CROSS_HARNESS_REVIEW_HOST=github` or `gitlab` |
+| `needs the 'gh' CLI` or `needs the 'glab' CLI` | Install it and sign in (`gh auth login`, `glab auth login`) |
+| `no open PR found for the current branch` | Pass `--pr N`, or push the branch and open the PR first |
+| `posting failed` | Read the message: usually an expired sign-in or no permission on the repository |

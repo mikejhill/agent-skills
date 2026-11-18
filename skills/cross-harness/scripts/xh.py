@@ -94,11 +94,19 @@ def state_home() -> Path:
     return Path(base) / "cross-harness"
 
 
+_JOBS_DIR = None
+
+
 def jobs_dir() -> Path:
+    global _JOBS_DIR
+    if _JOBS_DIR is not None:
+        return _JOBS_DIR
     d = state_home() / "jobs"
     try:
         d.mkdir(parents=True, exist_ok=True)
-        probe = d / ".write-probe"
+        # Per-process probe name: concurrent xh.py processes must not delete
+        # each other's probe.
+        probe = d / f".write-probe-{os.getpid()}-{secrets.token_hex(3)}"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as e:
@@ -107,6 +115,7 @@ def jobs_dir() -> Path:
             "sandbox (for example Codex workspace-write), rerun this command with "
             f"escalated permissions, or set {HOME_ENV} to a writable directory."
         )
+    _JOBS_DIR = d
     return d
 
 
@@ -451,13 +460,24 @@ def build_review_prompt(a) -> str:
             .replace("{{FOCUS}}", focus))
 
 
-def build_command(job: dict, prompt_path: Path, out_path: Path) -> tuple:
-    """Return (argv, stdin_text or None)."""
+CLAUDE_NATIVE_TOOLS = ["Read", "Grep", "Glob", "LS", "Agent", "Task", "Bash", "WebFetch", "TodoWrite"]
+
+
+def build_command(job: dict, step: str, prompt, out_path: Path) -> tuple:
+    """Return (argv, stdin_text or None) for one step: 'review', 'fix' or 'task'."""
     t, kind = job["target"], job["kind"]
     argv = resolve_cli(t)
-    prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else None
-    sandbox, model, effort = job.get("sandbox"), job.get("model"), job.get("effort")
+    model, effort = job.get("model"), job.get("effort")
     extra = job.get("extra") or []
+    native = kind == "review" and step == "review" and job.get("mode") == "native"
+    if step == "fix":
+        sandbox = "workspace-write"
+    elif native and t == "codex":
+        sandbox = job.get("sandbox") or "inherit"
+    else:
+        sandbox = job.get("sandbox") or "read-only"
+    ephemeral = job.get("ephemeral") and step != "fix"
+    resume = job.get("resume_session") if step == "task" else None
 
     if t == "codex":
         common = ["--json", "-o", str(out_path)]
@@ -467,16 +487,15 @@ def build_command(job: dict, prompt_path: Path, out_path: Path) -> tuple:
             common += ["-c", f'model_reasoning_effort="{effort}"']
         if job.get("isolate"):
             common += ["--ignore-rules"]
-        if job.get("ephemeral"):
+        if ephemeral:
             common += ["--ephemeral"]
-        if kind == "review" and job.get("native_review"):
+        cfg_sb = [] if sandbox == "inherit" else ["-c", f'sandbox_mode="{sandbox}"']
+        if native:
             scope = (["--commit", job["commit"]] if job.get("commit")
                      else ["--base", job["base"]] if job.get("base") else ["--uncommitted"])
-            sb = [] if sandbox == "inherit" else ["-c", f'sandbox_mode="{sandbox}"']
-            return argv + ["exec", "review"] + scope + sb + common + extra, None
-        if job.get("resume_session"):
-            sb = [] if sandbox == "inherit" else ["-c", f'sandbox_mode="{sandbox}"']
-            return argv + ["exec", "resume", job["resume_session"]] + sb + common + extra + ["-"], prompt
+            return argv + ["exec", "review"] + scope + cfg_sb + common + job.get("native_args", []) + extra, None
+        if resume:
+            return argv + ["exec", "resume", resume] + cfg_sb + common + extra + ["-"], prompt
         sb = [] if sandbox == "inherit" else ["-s", sandbox]
         return argv + ["exec"] + sb + common + extra + ["-"], prompt
 
@@ -486,21 +505,137 @@ def build_command(job: dict, prompt_path: Path, out_path: Path) -> tuple:
         args += ["--model", model]
     if effort:
         args += ["--effort", effort]
-    if job.get("ephemeral"):
+    if ephemeral:
         args += ["--no-session-persistence"]
     if job.get("isolate"):
         args += ["--setting-sources", "user"]
-    if job.get("resume_session"):
-        args += ["--resume", job["resume_session"]]
-    if sandbox == "read-only":
-        args += ["--allowedTools", ",".join(CLAUDE_READ_TOOLS + job.get("allow_tools", []))]
+    if resume:
+        args += ["--resume", resume]
+    allow = job.get("allow_tools", [])
+    if native:
+        # The harness's own review command decides what it does; grant what it
+        # needs. It edits only when asked to fix.
+        args += ["--allowedTools", ",".join(CLAUDE_NATIVE_TOOLS + allow)]
+        if job.get("fix"):
+            args += ["--permission-mode", "acceptEdits"]
+        else:
+            args += ["--disallowedTools", ",".join(CLAUDE_WRITE_DENY)]
+    elif sandbox == "read-only":
+        args += ["--allowedTools", ",".join(CLAUDE_READ_TOOLS + allow)]
         args += ["--disallowedTools", ",".join(CLAUDE_WRITE_DENY)]
     elif sandbox == "workspace-write":
         args += ["--permission-mode", "acceptEdits"]
-        args += ["--allowedTools", ",".join(CLAUDE_READ_TOOLS + job.get("allow_tools", []))]
-    elif job.get("allow_tools"):
-        args += ["--allowedTools", ",".join(job["allow_tools"])]
+        tools = CLAUDE_NATIVE_TOOLS if step == "fix" else CLAUDE_READ_TOOLS
+        args += ["--allowedTools", ",".join(tools + allow)]
+    elif allow:
+        args += ["--allowedTools", ",".join(allow)]
     return argv + args + extra, prompt
+
+
+def claude_native_prompt(job: dict) -> str:
+    """'/code-review ...' with the caller's arguments passed through verbatim."""
+    cmd = os.environ.get("CROSS_HARNESS_CLAUDE_REVIEW_CMD", "/code-review")
+    parts = [cmd] + list(job.get("native_args") or [])
+    if job.get("fix") and "--fix" not in parts:
+        parts.append("--fix")
+    if job.get("post") and job.get("pr") and "--comment" not in parts:
+        parts.append("--comment")
+    target = job.get("pr") or job.get("branch_target")
+    if target:
+        parts.append(str(target))
+    return " ".join(parts)
+
+
+def fix_prompt(job: dict, review_text: str) -> str:
+    return (load_prompt_template("fix.txt")
+            .replace("{{SCOPE}}", job.get("scope_text") or "the reviewed changes")
+            .replace("{{REVIEW}}", review_text.strip()))
+
+
+# -------------------------------------------------------------------- review hosts
+
+
+def _git(cwd, *args) -> str:
+    r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=30)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def review_host(cwd) -> str:
+    """'github' or 'gitlab' from the origin remote, or CROSS_HARNESS_REVIEW_HOST."""
+    forced = os.environ.get("CROSS_HARNESS_REVIEW_HOST")
+    if forced:
+        return forced.lower()
+    url = _git(cwd, "remote", "get-url", "origin").lower()
+    if "gitlab" in url:
+        return "gitlab"
+    if "github" in url:
+        return "github"
+    raise XhError(f"cannot tell the review host from origin '{url or '(none)'}'. Set "
+                  "CROSS_HARNESS_REVIEW_HOST=github or gitlab.", EXIT_USAGE)
+
+
+def _host_cli(host: str) -> str:
+    name = {"github": "gh", "gitlab": "glab"}.get(host)
+    if not name:
+        raise XhError(f"posting to '{host}' is not supported (github, gitlab)", EXIT_USAGE)
+    exe = os.environ.get(f"CROSS_HARNESS_{name.upper()}_BIN") or shutil.which(name)
+    if not exe:
+        raise XhError(f"posting to {host} needs the '{name}' CLI, signed in", EXIT_USAGE)
+    return [sys.executable, exe] if exe.lower().endswith(".py") else [exe]
+
+
+def current_review_request(cwd) -> dict:
+    """{'host','number','base'} for the PR/MR of the checked-out branch."""
+    host = review_host(cwd)
+    cli = _host_cli(host)
+    if host == "github":
+        r = subprocess.run([*cli, "pr", "view", "--json", "number,baseRefName"], cwd=str(cwd),
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0:
+            d = json.loads(r.stdout)
+            return {"host": host, "number": d["number"], "base": d.get("baseRefName")}
+    else:
+        r = subprocess.run([*cli, "mr", "view", "-F", "json"], cwd=str(cwd),
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0:
+            d = json.loads(r.stdout)
+            return {"host": host, "number": d["iid"], "base": d.get("target_branch")}
+    raise XhError(f"no open {'PR' if host == 'github' else 'MR'} found for the current branch; "
+                  f"pass --pr N ({(r.stderr or r.stdout).strip()[:200]})", EXIT_USAGE)
+
+
+def review_request(cwd, number) -> dict:
+    host = review_host(cwd)
+    cli = _host_cli(host)
+    if host == "github":
+        r = subprocess.run([*cli, "pr", "view", str(number), "--json", "number,baseRefName"], cwd=str(cwd),
+                           capture_output=True, text=True, timeout=60)
+        key_base = "baseRefName"
+    else:
+        r = subprocess.run([*cli, "mr", "view", str(number), "-F", "json"], cwd=str(cwd),
+                           capture_output=True, text=True, timeout=60)
+        key_base = "target_branch"
+    if r.returncode != 0:
+        raise XhError(f"cannot read {host} review request {number}: {(r.stderr or r.stdout).strip()[:300]}",
+                      EXIT_USAGE)
+    return {"host": host, "number": int(number), "base": json.loads(r.stdout).get(key_base)}
+
+
+def post_review(job: dict, body: str) -> str:
+    """Publish a review summary comment on the PR/MR. Returns the CLI's output."""
+    cwd, host = job["cwd"], job["post_host"]
+    cli = _host_cli(host)
+    if host == "github":
+        path = jobs_dir() / job["id"] / "post-body.md"
+        path.write_text(body, encoding="utf-8")
+        argv = [*cli, "pr", "comment", str(job["pr"]), "--body-file", str(path)]
+    else:
+        argv = [*cli, "mr", "note", str(job["pr"]), "--message", body]
+    r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=120,
+                       env=child_env(job), stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        raise XhError(f"posting failed: {(r.stderr or r.stdout).strip()[:500]}")
+    return (r.stdout or "posted").strip()
 
 
 def child_env(job: dict) -> dict:
@@ -610,11 +745,10 @@ def _linux_pdeathsig():
 # ---------------------------------------------------------------------- supervisor
 
 
-def finalize_outputs(job: dict, jdir: Path) -> dict:
-    """Read the CLI's output files into result fields."""
-    out_path, stdout_path = jdir / "result.md", jdir / "stdout.log"
+def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_session=None) -> dict:
+    """Read one CLI run's output files into result fields."""
     fields = {}
-    if job["target"] == "codex":
+    if target == "codex":
         session, errors = None, []
         try:
             for line in stdout_path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -634,7 +768,7 @@ def finalize_outputs(job: dict, jdir: Path) -> dict:
                         errors.append(str(msg))
         except OSError:
             pass
-        fields["session"] = session or job.get("resume_session")
+        fields["session"] = session or fallback_session
         if errors:
             fields["error"] = errors[-1]
     else:
@@ -653,17 +787,32 @@ def finalize_outputs(job: dict, jdir: Path) -> dict:
     return fields
 
 
+def progress(final: dict) -> dict:
+    """Intermediate fields: never a terminal status while steps remain."""
+    return {k: v for k, v in final.items() if k != "status"}
+
+
+class Stop(Exception):
+    """A watchdog condition ended the job."""
+
+    def __init__(self, status, reason):
+        super().__init__(reason)
+        self.status, self.reason = status, reason
+
+
 def supervise(job_id: str) -> int:
     jdir = jobs_dir() / job_id
     os.chdir(jdir)  # never hold the user's directory as our cwd
-    job = load_job(job_id)
+    job = update_job(job_id, supervisor={"pid": os.getpid(), "start": proc_start_time(os.getpid())})
     cont = Containment()
-    child = None
-    final = {"status": "failed"}
+    state = {"child": None}
+    deadline = time.time() + job["timeout_min"] * 60
+    owner = job.get("owner")
+    cancel_flag = jdir / "cancel"
 
     def handle_signal(signum, _frame):
         update_job(job_id, status="cancelled", ended=now_iso(), reason=f"signal {signum}")
-        cont.terminate(child)
+        cont.terminate(state["child"])
         os._exit(EXIT_FAIL)
 
     for sig in ("SIGTERM", "SIGINT", "SIGHUP", "SIGBREAK"):
@@ -673,15 +822,28 @@ def supervise(job_id: str) -> int:
             except (OSError, ValueError):
                 pass
 
-    try:
-        argv, stdin_text = build_command(job, jdir / "prompt.txt", jdir / "result.md")
-        with open(jdir / "stdout.log", "wb") as so, open(jdir / "stderr.log", "wb") as se:
+    def check_stop():
+        if cancel_flag.exists():
+            raise Stop("cancelled", "cancelled by request")
+        if time.time() > deadline:
+            raise Stop("timed_out", f"time limit of {job['timeout_min']} min reached")
+        if owner and not alive(owner["pid"], owner.get("start")):
+            raise Stop("orphaned", f"owner {owner['name']} (pid {owner['pid']}) exited")
+
+    def run_step(step: str, prompt, prefix: str) -> dict:
+        """Run one CLI step to completion. Returns parsed fields plus exit_code."""
+        out_path, so_path, se_path = jdir / f"{prefix}.md", jdir / f"{prefix}.stdout.log", jdir / f"{prefix}.stderr.log"
+        argv, stdin_text = build_command(job, step, prompt, out_path)
+        with open(so_path, "wb") as so, open(se_path, "wb") as se:
             child = subprocess.Popen(
                 argv, cwd=job["cwd"], env=child_env(job),
                 stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
                 stdout=so, stderr=se, **cont.popen_kwargs(),
             )
-            update_job(job_id, status="running", argv=argv,
+            state["child"] = child
+            update_job(job_id, status="running", step=step,
+                       argv=argv if step != "fix" else load_job(job_id).get("argv"),
+                       **({"fix_argv": argv} if step == "fix" else {}),
                        child={"pid": child.pid, "start": proc_start_time(child.pid)})
             if stdin_text is not None:
                 try:
@@ -689,39 +851,71 @@ def supervise(job_id: str) -> int:
                     child.stdin.close()
                 except OSError:
                     pass
-            deadline = time.time() + job["timeout_min"] * 60
-            owner = job.get("owner")
-            cancel_flag = jdir / "cancel"
-            while child.poll() is None:
-                time.sleep(1)
-                reason = None
-                if cancel_flag.exists():
-                    reason, status = "cancelled by request", "cancelled"
-                elif time.time() > deadline:
-                    reason, status = f"time limit of {job['timeout_min']} min reached", "timed_out"
-                elif owner and not alive(owner["pid"], owner.get("start")):
-                    reason, status = f"owner {owner['name']} (pid {owner['pid']}) exited", "orphaned"
-                if reason:
-                    update_job(job_id, status=status, reason=reason, ended=now_iso(),
-                               **finalize_outputs(job, jdir))
-                    cont.terminate(child)
-                    return EXIT_FAIL
-            code = child.returncode
-        final = finalize_outputs(job, jdir)
-        final["exit_code"] = code
-        has_result = (jdir / "result.md").is_file() and (jdir / "result.md").stat().st_size > 0
-        final["status"] = "succeeded" if code == 0 and has_result and not final.get("error") else "failed"
-        if final["status"] == "failed" and not final.get("error"):
-            tail = (jdir / "stderr.log").read_text(encoding="utf-8", errors="replace")[-800:].strip()
-            final["error"] = tail or f"exit code {code}" + ("" if has_result else ", no final message")
+            try:
+                while child.poll() is None:
+                    time.sleep(1)
+                    check_stop()
+            except Stop as e:
+                # Record first: on Windows, terminating the job ends this process too.
+                update_job(job_id, status=e.status, reason=e.reason, ended=now_iso())
+                cont.terminate(child)
+                raise
+        if not IS_WIN:
+            cont.reap(child)  # end stragglers between steps (Windows: at job end)
+        fields = parse_outputs(job["target"], so_path, out_path, job.get("resume_session"))
+        fields["exit_code"] = child.returncode
+        has = out_path.is_file() and out_path.stat().st_size > 0
+        fields["ok"] = child.returncode == 0 and has and not fields.get("error")
+        if not fields["ok"] and not fields.get("error"):
+            tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
+            fields["error"] = tail or f"exit code {child.returncode}" + ("" if has else ", no final message")
+        return fields
+
+    final = {}
+    claude_native = job["target"] == "claude" and job.get("mode") == "native"
+    try:
+        main_step = "task" if job["kind"] == "task" else "review"
+        prompt = (jdir / "prompt.txt").read_text(encoding="utf-8") if (jdir / "prompt.txt").exists() else None
+        r = run_step(main_step, prompt, "result")
+        ok = r.pop("ok")
+        final.update(r)
+        final["status"] = "succeeded" if ok else "failed"
+        review_text = (jdir / "result.md").read_text(encoding="utf-8", errors="replace") if ok else ""
+        if ok and job.get("fix") and not claude_native:
+            update_job(job_id, **progress(final))
+            fr = run_step("fix", fix_prompt(job, review_text), "fix")
+            final["fix_status"] = "succeeded" if fr.pop("ok") else "failed"
+            final["fix_session"] = fr.get("session")
+            if final["fix_status"] == "failed":
+                final["status"], final["error"] = "failed", f"fix step: {fr.get('error')}"
+        if ok and job.get("post") and not claude_native:
+            update_job(job_id, **progress(final))
+            check_stop()
+            body = f"**{job['target'].capitalize()} review** (cross-harness" + \
+                   (", adversarial" if job.get("adversarial") else "") + ")\n\n" + review_text.strip()
+            fix_md = jdir / "fix.md"
+            if final.get("fix_status") == "succeeded" and fix_md.is_file():
+                body += "\n\n---\n\n**Fixes applied**\n\n" + fix_md.read_text(encoding="utf-8").strip()
+            try:
+                final["posted"] = post_review(job, body)
+            except XhError as e:
+                final["status"], final["error"] = "failed", str(e)
+    except Stop as e:
+        final.update(status=e.status, reason=e.reason)
     except XhError as e:
-        final = {"status": "failed", "error": str(e)}
+        final.update(status="failed", error=str(e))
     except Exception as e:  # noqa: BLE001 - record any failure instead of leaving "running"
-        final = {"status": "failed", "error": f"supervisor error: {e!r}"}
+        final.update(status="failed", error=f"supervisor error: {e!r}")
+    err = str(final.get("error") or "")
+    if final.get("status") == "failed" and re.search(
+            r"model_not_found|model is not supported|unknown model|invalid model", err, re.I):
+        final["hint"] = ("the model was rejected; the target's configured default may not be available to this "
+                         "account. Retry with --model set to a supported model.")
     final["ended"] = now_iso()
+    final.pop("ok", None)
     update_job(job_id, **final)
-    if child is not None:
-        cont.reap(child)  # on Windows this ends the supervisor too
+    if state["child"] is not None or IS_WIN:
+        cont.reap(state["child"])  # on Windows this ends the supervisor too
     return EXIT_OK
 
 
@@ -758,6 +952,11 @@ def sweep(kill: bool = True) -> list:
             continue
         if not sup and time.time() - parse_iso(job.get("created", "")) < 30:
             continue  # still starting
+        # The supervisor is gone. Re-read: it writes its final state before it
+        # exits, so a record read before that write is stale.
+        job = load_job(job["id"])
+        if job.get("status") not in ACTIVE:
+            continue
         killed = False
         ch = job.get("child") or {}
         if kill and ch:
@@ -814,17 +1013,20 @@ def create_job(a, kind: str, prompt) -> dict:
     }
     if kind == "review":
         job.update(base=a.base, commit=a.commit, focus=a.focus, adversarial=a.adversarial,
-                   ephemeral=True,
-                   native_review=(a.target == "codex" and not a.adversarial and not a.focus))
+                   ephemeral=True, mode=a.mode, native_args=a.native_args, fix=a.fix,
+                   post=a.post, pr=a.pr, post_host=a.post_host, scope_text=scope_text(a),
+                   branch_target=a.branch_target)
     else:
         job.update(ephemeral=a.ephemeral,
                    resume_session=resolve_session(a.target, a.resume) if a.resume else None)
     if prompt is not None:
         (jdir / "prompt.txt").write_text(prompt, encoding="utf-8")
     save_job(job)
-    pid = spawn_supervisor(job_id)
-    update_job(job_id, supervisor={"pid": pid, "start": proc_start_time(pid)})
-    return load_job(job_id)
+    # From here on only the supervisor writes job.json (it records its own pid
+    # first), and the sweep writes only once the supervisor is gone. A single
+    # writer avoids lost updates between processes.
+    spawn_supervisor(job_id)
+    return job
 
 
 def read_prompt(a) -> str:
@@ -840,10 +1042,35 @@ def read_prompt(a) -> str:
 
 
 def cmd_review(a) -> int:
-    if a.target == "codex" and a.sandbox == "workspace-write":
-        raise XhError("reviews are read-only; use 'task --write' to let the other agent edit", EXIT_USAGE)
-    a.sandbox = a.sandbox or "read-only"
-    prompt = None if (a.target == "codex" and not a.adversarial and not a.focus) else build_review_prompt(a)
+    import shlex
+    cwd = Path(a.cwd or os.getcwd()).resolve()
+    a.native_args = shlex.split(a.native_args or "", posix=not IS_WIN) if a.native_args else []
+    a.post_host, a.branch_target = None, None
+    # Resolve the PR/MR first: it supplies the base and the post target.
+    if a.pr is not None or a.post:
+        req = review_request(cwd, a.pr) if a.pr is not None else current_review_request(cwd)
+        a.pr, a.post_host = req["number"], req["host"]
+        if not (a.base or a.commit or a.uncommitted) and req.get("base"):
+            remote = f"origin/{req['base']}"
+            a.base = remote if _git(cwd, "rev-parse", "--verify", "-q", remote) else req["base"]
+    # Native review = the harness's own reviewer (Codex: exec review; Claude:
+    # /code-review). Custom instructions need the skill's prompt instead.
+    native = not (a.focus or a.adversarial or a.no_native)
+    if native and a.target == "claude" and a.commit:
+        native = False  # /code-review has no commit target
+    if a.native_args and not native:
+        raise XhError("--native-args applies only to native reviews (no --focus, --adversarial, --no-native)",
+                      EXIT_USAGE)
+    a.mode = "native" if native else "prompt"
+    if native and a.target == "claude" and a.base and a.pr is None:
+        a.branch_target = _git(cwd, "rev-parse", "--abbrev-ref", "HEAD") or None
+    if not native:
+        prompt = build_review_prompt(a)
+    elif a.target == "claude":
+        prompt = claude_native_prompt({"native_args": a.native_args, "fix": a.fix, "post": a.post,
+                                       "pr": a.pr, "branch_target": a.branch_target})
+    else:
+        prompt = None  # codex exec review takes its scope as flags
     job = create_job(a, "review", prompt)
     return after_start(job, a)
 
@@ -877,6 +1104,12 @@ def render_result(job: dict, as_json: bool) -> str:
         head += f"\nerror: {job['error']}"
     if job.get("reason"):
         head += f"\nreason: {job['reason']}"
+    if job.get("hint"):
+        head += f"\nhint: {job['hint']}"
+    if job.get("fix_status"):
+        head += f"\nfix: {job['fix_status']} (details: xh.py result {job['id']} --fix-report)"
+    if job.get("posted"):
+        head += f"\nposted: {job['posted']}"
     return head + ("\n\n" + text.strip() if text.strip() else "")
 
 
@@ -902,6 +1135,10 @@ def cmd_wait(a) -> int:
 def cmd_result(a) -> int:
     sweep()
     job = load_job(a.job)
+    if a.fix_report:
+        fp = jobs_dir() / job["id"] / "fix.md"
+        print(fp.read_text(encoding="utf-8", errors="replace") if fp.is_file() else "no fix report")
+        return EXIT_OK
     print(render_result(job, a.json))
     if job["status"] in ACTIVE:
         return EXIT_RUNNING
@@ -910,7 +1147,7 @@ def cmd_result(a) -> int:
 
 def summary(job: dict) -> dict:
     keys = ("id", "target", "kind", "status", "label", "cwd", "created", "ended", "session",
-            "exit_code", "error", "reason", "cost_usd")
+            "exit_code", "error", "reason", "hint", "cost_usd", "mode", "pr", "fix_status", "posted")
     out = {k: job.get(k) for k in keys if job.get(k) is not None}
     if job.get("owner"):
         o = job["owner"]
@@ -1050,9 +1287,16 @@ def main(argv=None) -> int:
     g.add_argument("--base", help="review the branch against this base ref")
     g.add_argument("--commit", help="review one commit")
     g.add_argument("--uncommitted", action="store_true", help="review working-tree changes (default)")
-    p.add_argument("--focus", help="extra review instructions")
-    p.add_argument("--adversarial", action="store_true", help="use the adversarial review prompt")
-    p.add_argument("--sandbox", choices=("read-only", "inherit"), help="default read-only")
+    p.add_argument("--pr", type=int, help="PR/MR number: sets the base and the post target")
+    p.add_argument("--native-args", metavar="ARGS",
+                   help="arguments passed verbatim to the native reviewer (Claude: '/code-review ARGS')")
+    p.add_argument("--no-native", action="store_true", help="use the skill's review prompt instead")
+    p.add_argument("--focus", help="extra review instructions (uses the skill's prompt)")
+    p.add_argument("--adversarial", action="store_true", help="adversarial review (uses the skill's prompt)")
+    p.add_argument("--fix", action="store_true", help="apply fixes for the findings in --cwd")
+    p.add_argument("--post", action="store_true", help="post the review to the PR/MR (gh or glab)")
+    p.add_argument("--sandbox", choices=("read-only", "workspace-write", "inherit"),
+                   help="review sandbox (Codex native default: inherit; prompt reviews: read-only)")
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("task", help="hand a prompt or task to the other agent")
@@ -1074,6 +1318,7 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("result", help="print a job's result without waiting")
     p.add_argument("job")
+    p.add_argument("--fix-report", action="store_true", help="print the fix step's report")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_result)
 

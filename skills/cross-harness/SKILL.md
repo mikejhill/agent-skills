@@ -55,7 +55,8 @@ Paths are relative to this skill's directory.
 | Command | Purpose |
 |---|---|
 | `check [-t T]` | CLI path, version, sign-in, state home |
-| `review -t T [--base REF \| --commit SHA \| --uncommitted] [--focus TEXT] [--adversarial]` | Read-only review of a diff |
+| `review -t T [--base REF \| --commit SHA \| --uncommitted \| --pr N] [--native-args "..."] [--fix] [--post]` | Run the target's own reviewer; optionally fix and post |
+| `review ... --adversarial` / `--focus TEXT` | The skill's review prompt instead of the native reviewer |
 | `task -t T [--write] [--resume JOB] "prompt"` (or `--prompt-file F`, or stdin) | Hand over a prompt or task |
 | `wait JOB [--timeout S]` / `result JOB` | Get the outcome |
 | `status [--all] [JOB]` | Jobs with owner, PIDs, liveness, and target directory |
@@ -70,15 +71,27 @@ and `--json`.
 
 ## Reviews
 
-`review` is always read-only. `--base main` reviews the branch against `main`,
-`--commit SHA` reviews one commit, and the default reviews uncommitted changes. Add
-`--adversarial` for an attack-minded pass, and `--focus "..."` to steer it. A Codex
-review without either uses Codex's built-in reviewer (`codex exec review`). Reviews
-are not saved to the other agent's session history.
+By default `review` runs the target's **own** reviewer and lets it behave as it
+normally does:
 
-Before passing findings on: check each one against the code. Drop findings you can
-show are wrong, say which ones you disagree with and why, and fix only what the user
-asked you to fix. Details: [reviews](references/reviews.md).
+- Codex: `codex exec review` (the headless form of `/review`), scoped by `--base`,
+  `--commit`, `--uncommitted`, or `--pr`.
+- Claude Code: `/code-review` in `claude -p`. `--native-args "high --max-findings all"`
+  is appended verbatim, so its levels and flags keep working as they change.
+
+`--fix` applies fixes. Claude fixes inside its own review (`/code-review --fix`). For
+Codex the skill runs a second, write-enabled step that gets the findings. `--post`
+publishes the review to the PR or MR: Claude uses its own `--comment`, and otherwise
+the skill posts one summary comment with `gh` (GitHub) or `glab` (GitLab). `--pr N`
+picks the PR or MR. Without it, the current branch's is used.
+
+`--adversarial` or `--focus "..."` switch to the skill's own review prompt, which is
+read-only. `--fix` and `--post` still work as follow-up steps.
+
+Before relaying findings, check each one against the code. Say which you confirmed,
+which you refuted and why, and fix only what the user asked for. Posting and fixing
+change things outside the conversation, so do either only when the user or their
+instructions ask. Details: [reviews](references/reviews.md).
 
 ## Tasks
 

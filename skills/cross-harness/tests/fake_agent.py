@@ -24,6 +24,10 @@ if argv[:2] in (["login", "status"], ["auth", "status"]):
     sys.exit(0)
 
 prompt = "" if sys.stdin is None or sys.stdin.closed else sys.stdin.read()
+log = os.environ.get("FAKE_PROMPTS")
+if log:
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"flavor": flavor, "argv": argv, "prompt": prompt}) + "\n")
 pids = os.environ.get("FAKE_PIDS")
 if pids:
     with open(pids, "a") as f:

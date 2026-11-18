@@ -13,11 +13,14 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
    from Codex.
 3. Used only on request. The description stays neutral, and invocation comes from the
    user or their instruction files.
-4. Honest about value. Document that cross-model review and delegation help
+4. Reviews follow each harness's own review tool (`codex exec review`, Claude's
+   `/code-review`), with its arguments passed through, including fixes. Posting to
+   GitHub or GitLab is a common feature for every target.
+5. Honest about value. Document that cross-model review and delegation help
    sometimes, and that this is not consistently proven.
-5. A skill, not a plugin: progressive disclosure, no hooks, no session environment
+6. A skill, not a plugin: progressive disclosure, no hooks, no session environment
    writes, harness-neutral layout, stdlib-only Python.
-6. Thin over the CLIs: `codex exec` and `codex exec review`, `claude -p`. Pass models,
+7. Thin over the CLIs: `codex exec` and `codex exec review`, `claude -p`. Pass models,
    efforts, and extra flags through unchanged, so CLI updates don't break the skill.
 
 ## Design decisions
@@ -37,15 +40,17 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
   command-line quoting, and no untracked-file or symlink crashes.
 - **Per-job state** in a user state home (`%LOCALAPPDATA%` or `XDG_STATE_HOME`),
   keyed by job id and recording owner, target directory, and pids. Never keyed by cwd.
-- **Read-only by default.** Write needs `--write`. No `--trust` or bypass flags.
+- **Native reviews by default** (user decision, 2026-11-18): the harness's reviewer runs
+  as designed, edits only with `--fix`, and posts only with `--post`. Tasks are
+  read-only unless `--write`. No `--trust` or bypass flags.
 - **One nesting level** (`CROSS_HARNESS_DEPTH`), to stop ping-pong loops.
 
 ## Upstream problems addressed
 
-Verified against the upstream source (1.0.6) and its issue tracker, against Mike's
-2026-11-14 session report, and on his laptop on 2026-11-18. The last check found a
-leaked broker tree of 33 processes holding a deleted review worktree, plus 4 more
-orphaned trees.
+Verified against the upstream source (1.0.6) and its issue tracker, against a user's
+2026-11-14 session report, and on a Windows 11 machine on 2026-11-18. That check
+found a leaked broker tree of 33 processes holding a deleted review worktree, plus 4
+more orphaned trees.
 
 | Upstream problem | Evidence | Here |
 |---|---|---|
@@ -79,8 +84,20 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
 
 ## Log
 
-- 2026-11-18: [agent] Created from Mike's request and session report. Built `xh.py`
+- 2026-11-18: [agent] Created from a user request and session report. Built `xh.py`
   (supervisor, containment, owner watchdog, sweep, start and wait, resume),
   review prompts, references, and `tests/smoke_test.py` with a fake agent
   (13 lifecycle cases). Live-tested the Claude Code target: adversarial review,
   write task, and resume.
+- 2026-11-18: [agent] Verified on Windows 11 (Python 3.13, codex-cli 0.159, Claude Code
+  2.1.322): smoke test 13/13; live Codex plain and adversarial reviews, Claude
+  adversarial review, Codex write task. Cancelling a live Codex task ended all 16
+  processes in its tree (codex.exe, MCP servers, shells, conhost), and the repo folder
+  was deletable at once. Added a hint for rejected default models (`model_not_found`).
+- 2026-11-18: [agent] Reviews reworked at the user's request: native reviewer by default
+  (Claude `/code-review` via `claude -p`, verified headless; Codex `exec review`),
+  `--native-args` passed through verbatim, `--fix` (native for Claude, a follow-up write
+  step for Codex and for prompt reviews), `--post` (Claude `--comment`, otherwise
+  `gh pr comment` or `glab mr note`), and `--pr`. Fixed two races found by repeated
+  test runs: a shared write-probe file, and a sweep overwriting a just-finished job.
+  Only the supervisor writes `job.json` while it lives.

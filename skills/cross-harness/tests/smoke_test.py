@@ -39,6 +39,13 @@ def fake_bin(flavor):
     return str(p)
 
 
+ENV.update(FAKE_PROMPTS=str(TMP / "prompts"), FAKE_POSTS=str(TMP / "posts"),
+           CROSS_HARNESS_REVIEW_HOST="github", CROSS_HARNESS_GH_BIN=str(HERE / "fake_gh.py"))
+if not IS_WIN:
+    gh = TMP / "fake-gh"
+    gh.write_text(f"#!/bin/sh\nexec {sys.executable} {HERE / 'fake_gh.py'} \"$@\"\n")
+    gh.chmod(0o755)
+    ENV["CROSS_HARNESS_GH_BIN"] = str(gh)
 ENV["CROSS_HARNESS_CODEX_BIN"] = fake_bin("codex")
 ENV["CROSS_HARNESS_CLAUDE_BIN"] = fake_bin("claude")
 if IS_WIN:
@@ -217,6 +224,57 @@ def _():
     assert "resume" in a and job(jid)["session"] in a, a
 
 
+def prompts(flavor):
+    f = TMP / "prompts"
+    rows = [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+    return [r for r in rows if r["flavor"] == flavor]
+
+
+@case("claude native review sends /code-review with args verbatim and --fix enables edits")
+def _():
+    env = dict(ENV, FAKE_FLAVOR="claude")
+    jid = start("review", "-t", "claude", "--native-args", "high --max-findings all", "--fix", env=env)
+    run("wait", jid, "--timeout", "30", check=0, env=env)
+    j = job(jid)
+    assert j["mode"] == "native" and "acceptEdits" in j["argv"] and "Bash" in ",".join(j["argv"]), j["argv"]
+    assert prompts("claude")[-1]["prompt"].strip() == "/code-review high --max-findings all --fix", prompts("claude")[-1]
+    assert "fix_status" not in j  # Claude fixes inside its own review
+
+
+@case("codex native review --fix runs a write step; --post comments on the PR")
+def _():
+    jid = start("review", "-t", "codex", "--pr", "42", "--fix", "--post")
+    run("wait", jid, "--timeout", "60", check=0)
+    j = job(jid)
+    assert j["argv"][j["argv"].index("--base") + 1] == "main", j["argv"]
+    assert "sandbox_mode" not in " ".join(j["argv"]), j["argv"]  # native: harness's own sandbox
+    assert j["fix_status"] == "succeeded" and "workspace-write" in j["fix_argv"], j
+    assert "fake codex answer" in prompts("codex")[-1]["prompt"]  # review fed to fix step
+    posts = [json.loads(l) for l in (TMP / "posts").read_text(encoding="utf-8").splitlines()]
+    assert posts[-1]["pr"] == "42" and "Codex review" in posts[-1]["body"] and "Fixes applied" in posts[-1]["body"]
+    assert j["posted"].endswith("#comment")
+
+
+@case("claude native --post uses its own --comment on the current PR")
+def _():
+    env = dict(ENV, FAKE_FLAVOR="claude")
+    before = (TMP / "posts").read_text() if (TMP / "posts").exists() else ""
+    jid = start("review", "-t", "claude", "--post", env=env)
+    run("wait", jid, "--timeout", "30", check=0, env=env)
+    assert prompts("claude")[-1]["prompt"].strip() == "/code-review --comment 7"
+    after = (TMP / "posts").read_text() if (TMP / "posts").exists() else ""
+    assert before == after, "xh must not post twice"
+
+
+@case("adversarial review stays read-only and refuses --native-args")
+def _():
+    run("review", "-t", "codex", "--adversarial", "--native-args", "x", "--no-owner", check=2)
+    jid = start("review", "-t", "codex", "--adversarial")
+    run("wait", jid, "--timeout", "30", check=0)
+    a = job(jid)["argv"]
+    assert a[a.index("-s") + 1] == "read-only" and "review" not in a, a
+
+
 @case("no job holds the repo after completion")
 def _():
     run("status", check=0)
@@ -227,6 +285,7 @@ def _():
     WORK.mkdir()
 
 
-print(f"\n{len(FAILS)} failed" if FAILS else "\nall passed")
-shutil.rmtree(TMP, ignore_errors=True)
+print(f"\n{len(FAILS)} failed; state kept in {TMP}" if FAILS else "\nall passed")
+if not FAILS:
+    shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(1 if FAILS else 0)
