@@ -79,7 +79,7 @@ def main():
                                "--no-default-browser-check",
                                # Edge signs a fresh profile in with the Windows account and syncs the
                                # user's extensions (first-run windows, their data in a temp dir)
-                               "--disable-sync", "--disable-extensions"]
+                               "--disable-sync", "--disable-extensions", "--disable-features=msImplicitSignin"]
                              + (["--no-sandbox"] if getattr(os, "geteuid", lambda: 1)() == 0 else [])  # root (CI containers)
                              + ["about:blank"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
