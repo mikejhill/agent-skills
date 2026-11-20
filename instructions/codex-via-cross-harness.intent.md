@@ -5,14 +5,14 @@ skill, including its automatic review gate, so the plugin can be removed.
 
 ## Goals
 
-1. Claude automatically gets a Codex review of its changes before finishing a turn
-   that changed repository files, without the user asking, like the plugin's
-   stop-time review gate.
+1. Match the plugin's stop-time review gate. It is opt-in per repository and off by
+   default. Where it is on, Claude gets an adversarial Codex review of each turn's
+   direct code edits before finishing that turn.
 2. Claude Code only. SkillSinc routes these items to the `claude` destination alone.
    Every other route excludes `instructions/codex-via-cross-harness` and
    `prompts/codex-*`.
-3. The gate stays bounded: at most two review rounds per turn, and nothing leaks
-   processes or loops without limit.
+3. The gate stays bounded: at most two review rounds per turn. The plugin loops until
+   Codex allows the stop. Nothing leaks processes.
 4. Codex's output is verified before it's relayed. It's never presented as the
    verdict.
 5. Parity with the plugin's commands: `/codex-review`, `/codex-adversarial-review`,
@@ -31,3 +31,17 @@ skill, including its automatic review gate, so the plugin can be removed.
   any turn that changes repository files, before completion, commit, or merge. It
   verifies and fixes confirmed findings, stops after two rounds, and is skipped for
   read-only turns, user opt-out, and sessions that Codex started.
+- 2026-11-20: The user questioned whether the plugin really reviewed every editing
+  turn. [agent] Checked upstream 1.0.6:
+  - `hooks/hooks.json` registers a `Stop` hook, `stop-review-gate-hook.mjs`. It returns
+    at once unless `stopReviewGate` is set in the workspace's state.
+  - `stopReviewGate` defaults to false (`lib/state.mjs`). `/codex:setup
+    --enable-review-gate` sets it, per workspace root.
+  - When the gate is on, the hook runs a read-only Codex task on every stop, using
+    `prompts/stop-review-gate.md`. Codex answers ALLOW right away unless that turn made
+    direct edits, and BLOCK stops Claude from finishing, with no round limit.
+  - The README warns that it can loop and drain usage limits.
+
+  The gate now follows that design. It is opt-in per repository, through `git config
+  --local cross-harness.reviewGate true`, and off by default. It reviews only this
+  turn's edits, adversarially, and stops after two rounds.
