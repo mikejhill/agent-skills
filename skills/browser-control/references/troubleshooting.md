@@ -26,7 +26,10 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 2. **Launch flag** `--remote-debugging-port=9222`: no prompt, `/json/*` served. Chrome 136+
    ignores it for the default profile; it needs `--user-data-dir=<separate dir>` (a fresh
    profile without the user's logins). Only use this if the user asks for an isolated
-   browser; never kill or relaunch the user's browser yourself.
+   browser; never kill or relaunch the user's browser yourself. Edge signs a fresh profile in
+   with the Windows account and syncs extensions: add `--disable-sync --disable-extensions`.
+   `msedge.exe` hands off to the real browser process and exits, so close it with
+   `send Browser.close`, not by the launcher's PID.
 
 ## Symptoms
 

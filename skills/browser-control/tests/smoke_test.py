@@ -76,7 +76,10 @@ def main():
     procs = [subprocess.Popen([sys.executable, os.path.join(HERE, "fixture_server.py"), str(web)]),
              subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=%d" % cdp,
                                "--user-data-dir=" + os.path.join(tmp, "profile"), "--no-first-run",
-                               "--no-default-browser-check"]
+                               "--no-default-browser-check",
+                               # Edge signs a fresh profile in with the Windows account and syncs the
+                               # user's extensions (first-run windows, their data in a temp dir)
+                               "--disable-sync", "--disable-extensions"]
                              + (["--no-sandbox"] if getattr(os, "geteuid", lambda: 1)() == 0 else [])  # root (CI containers)
                              + ["about:blank"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
@@ -269,18 +272,25 @@ def main():
                 and len(o.splitlines()) == 7, o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
+        r.cli("send", "Browser.close")  # the real browser: msedge.exe hands off to it and exits
         r.cli("stop")
+        if os.name == "nt":  # anything still running from this profile
+            subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*%s*' } | "
+                            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+                            % os.path.basename(tmp)], capture_output=True)
         for p in procs:
-            if os.name == "nt":  # terminate() leaves the browser's child processes running
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
-            else:
-                p.terminate()
+            p.terminate()
         for p in procs:
             try:
                 p.wait(10)
             except subprocess.TimeoutExpired:
                 p.kill()
-        shutil.rmtree(tmp, ignore_errors=True)
+        for _ in range(10):  # Windows releases profile files a moment after the processes exit
+            shutil.rmtree(tmp, ignore_errors=True)
+            if not os.path.exists(tmp):
+                break
+            time.sleep(0.5)
     print("%d failure(s)" % r.failures)
     return 1 if r.failures else 0
 
