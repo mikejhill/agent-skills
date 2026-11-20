@@ -52,6 +52,7 @@ DEFAULT_IDLE = 3600  # seconds without a CLI request before the broker exits
 # A new broker means a new approval prompt in the browser, so the default is long; override
 # with BROWSER_CONTROL_IDLE (seconds) or `start --idle`.
 IDLE_ENV = "BROWSER_CONTROL_IDLE"
+SUMMARY_ENV = "BROWSER_CONTROL_SUMMARY"  # brief (default) | full | none: change summary on actions
 CONNECT_WAIT = 120  # seconds to wait for the user to approve the browser prompt
 EVENT_BUFFER = 20000  # Network.enable on a busy SPA emits thousands of events per page
 INFLIGHT_MAX_AGE = 10.0  # ignore requests open longer than this (long-poll, streaming)
@@ -71,7 +72,7 @@ SLD_SUFFIXES = {"co", "com", "net", "org", "gov", "ac", "edu", "ne", "or", "go",
 # In-page helper library, (re)defined idempotently before every eval, so it survives
 # navigations and SPA reloads with no separate injection step. Everything pierces open
 # shadow roots and same-origin iframes. Exposed to `eval` code as `__dt`.
-DT_VERSION = 4
+DT_VERSION = 5
 DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG']);
   const CLICKABLE = 'a,button,summary,label,select,option,input[type=button],input[type=submit],' +
@@ -122,8 +123,71 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
     if (o.grep) { const re = new RegExp(o.grep, 'i'); const ls = t.split('\n'); const c = o.context || 0; const keep = new Set();
       ls.forEach((l, i) => { if (re.test(l)) for (let j = i - c; j <= i + c; j++) keep.add(j); });
       t = ls.filter((l, i) => keep.has(i)).join('\n'); }
+    let prev = globalThis.__dtLastText; globalThis.__dtLastText = t;
+    if (o.changed) {
+      if (prev == null) t = '[no earlier text read in this document: full text]\n' + t;
+      else { const d = diffLines(prev.split('\n'), t.split('\n'));
+        t = d.added.length || d.removed ? d.added.join('\n') + (d.removed ? '\n[' + d.removed + ' lines removed]' : '')
+          : '[no change since the last text read]'; }
+    }
     const total = t.length, off = o.offset || 0, max = o.max || 8000;
     return { text: t.slice(off, off + max), total, more: Math.max(0, total - off - max) };
+  };
+  // Multiset line diff: lines of `b` not in `a` (document order) and how many of `a` are gone.
+  const diffLines = (a, b) => {
+    const n = new Map(); for (const l of a) n.set(l, (n.get(l) || 0) + 1);
+    const added = [];
+    for (const l of b) { const k = n.get(l) || 0; if (k) n.set(l, k - 1); else added.push(l); }
+    let removed = 0; for (const k of n.values()) removed += k;
+    return { added, removed };
+  };
+  // Change summary for actions: mark() before, changes() after settling. Kept on globalThis
+  // (not __dt) so a helper-version upgrade doesn't lose it; a new document starts empty.
+  const CONTROLS = 'a,button,input,select,textarea,[role=link],[role=button],[role=tab],[role=menuitem]';
+  const focusLabel = () => { let a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (!a || a === document.body) return null;
+    return (a.tagName.toLowerCase() + ' ' + (label(a) || a.getAttribute('name') || a.id || '')).trim().slice(0, 80); };
+  const alertTexts = () => [...new Set(qsa('[role=alert],[aria-live]:not([aria-live=off]),:invalid').filter(vis)
+    .map(e => e.matches(':invalid') && e.validationMessage ? (label(e) || e.name || e.tagName.toLowerCase()) + ': ' + e.validationMessage
+      : norm(e.innerText || e.textContent)).filter(Boolean))];
+  const snap = () => ({ url: location.href, title: document.title, focus: focusLabel(),
+    lines: deepText().split('\n').filter(Boolean),
+    controls: qsa(CONTROLS).filter(vis).map(label).filter(Boolean), alerts: alertTexts() });
+  const mark = () => { globalThis.__dtBefore = snap(); return true; };
+  const changes = (o = {}) => {
+    const full = o.mode === 'full', cap = full ? 2400 : 1200, maxAdded = full ? 30 : 12;
+    const ell = l => l.length > 160 ? l.slice(0, 159) + '\u2026' : l;
+    const b = globalThis.__dtBefore, a = snap(); globalThis.__dtBefore = a;
+    let r;
+    if (!b || o.nav) {
+      r = { url: a.url, title: a.title, head: a.lines.slice(0, 6).map(ell) };
+    } else {
+      r = {};
+      if (a.url !== b.url) r.url = a.url;
+      if (a.title !== b.title) r.title = a.title;
+      if (a.focus !== b.focus && a.focus) r.focus = a.focus;
+      const d = diffLines(b.lines, a.lines);
+      if (d.added.length) r.added = d.added.map(ell);
+      if (d.removed) r.removed = d.removed;
+      const nc = [...new Set(diffLines(b.controls, a.controls).added)].map(ell);
+      if (nc.length) r.new_controls = nc.slice(0, 15);
+      const al = a.alerts.filter(x => !b.alerts.includes(x)).map(ell);
+      if (al.length) r.alerts = al.slice(0, 5);
+      if (!Object.keys(r).length) return { changed: false };
+    }
+    const list = r.added ? 'added' : r.head ? 'head' : null;
+    const total = list ? r[list].length : 0;
+    let keep = list ? Math.min(total, list === 'head' ? 6 : maxAdded) : 0;
+    const build = () => { const x = Object.assign({}, r);
+      if (list) { x[list] = r[list].slice(0, keep);
+        if (keep < total) x.more = '+' + (total - keep) + ' more lines: text --after ' +
+          JSON.stringify((r[list][keep - 1] || '').slice(0, 40)); }
+      return x; };
+    let x = build();
+    while (JSON.stringify(x).length > cap && keep > 0) { keep--; x = build(); }
+    while (JSON.stringify(x).length > cap && x.new_controls && x.new_controls.length) { r.new_controls.pop(); x = build(); }
+    return x;
   };
   const find = (o = {}) => {
     let c = o.selector ? qsa(o.selector) : qsa(CLICKABLE);
@@ -187,7 +251,7 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
       (strict ? '|' + performance.getEntriesByType('resource').length : '');
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep };
+  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep, mark, changes };
 })();
 void 0;
 """ % (DT_VERSION, DT_VERSION)
@@ -782,6 +846,13 @@ class Broker:
         return out
 
     def wait(self, req):
+        r = self._wait(req)
+        if req.get("after"):  # e.g. the change summary, in the same broker call
+            v, err = self.evaluate(self.session_for(req["target"])[1], req["after"])
+            r["after"] = v if not err else {"error": err}
+        return r
+
+    def _wait(self, req):
         """Poll until `cond` holds, then (if settle) until the page is quiet.
 
         Quiet = for `quiet` seconds: no busy request (same-site document/XHR/fetch/script, a
@@ -1145,8 +1216,9 @@ def js_eval(args, expr, target, timeout=30):
     return r.get("result", {}).get("value")
 
 
-def broker_wait(args, target, cond=None, settle=True, quiet=None, timeout=15, action=False):
+def broker_wait(args, target, cond=None, settle=True, quiet=None, timeout=15, action=False, after=None):
     r = rpc({"op": "wait", "target": target, "cond": cond, "settle": settle, "quiet": quiet, "action": action,
+             "after": after,
              "timeout": timeout, "settle_max": getattr(args, "settle_max", None),
              "strict": getattr(args, "strict_settle", False)}, broker(args), timeout=timeout + 15)
     if "error" in r:
@@ -1318,7 +1390,7 @@ def cmd_nav(args):
     res = {"frameId": r.get("frameId"), "loaded": (bool(ev) or same_doc) if not args.no_wait else None}
     if args.no_wait:
         return out(res, args)
-    out(after_action(args, res), args)
+    out(after_action(args, res, nav=True), args)
 
 
 def cmd_screenshot(args):
@@ -1380,14 +1452,29 @@ def apply_wait(res, w, cond):
             res.get("timeout") or "settle capped", w["waited"], ", ".join(w.get("busy") or []) or "-"))
 
 
-def after_action(args, res):
-    """Shared tail for click/key/nav: wait for a condition and/or quiet, then optional text."""
+def summary_mode(args):
+    m = getattr(args, "summary", None) or os.environ.get(SUMMARY_ENV) or "brief"
+    return m if m in ("brief", "full", "none") else "brief"
+
+
+def after_action(args, res, nav=False):
+    """Shared tail for click/key/nav: wait for a condition and/or quiet, then the change
+    summary (computed in the same broker call) and optional text."""
     cond = wait_opts(args)
     settle = want_settle(args, cond)
+    mode = summary_mode(args)
+    after = None if mode == "none" else "__dt.changes(%s)" % json.dumps({"mode": mode, "nav": nav})
     if cond or settle:
         w = broker_wait(args, args.target, cond, settle=settle, quiet=args.quiet, timeout=args.timeout,
-                        action=args.fn in (cmd_click, cmd_key))
+                        action=args.fn in (cmd_click, cmd_key), after=after)
         apply_wait(res, w, cond)
+        ch = w.get("after")
+    else:
+        ch = js_eval(args, after, args.target) if after else None
+    if isinstance(ch, dict):
+        if "timeout" in res or res.get("settle") == "capped":
+            ch["settled"] = False
+        res["changes"] = ch
     if getattr(args, "show", None) is not None:
         o = {"max": args.max}
         if args.show:
@@ -1404,7 +1491,8 @@ def cmd_click(args):
     o = {k: v for k, v in o.items() if v not in (None, False)}
     if want_settle(args, wait_opts(args)):  # start network tracking before the click, not after it
         rpc({"op": "netwatch", "target": args.target}, broker(args))
-    p = js_eval(args, "__dt.pick(%s)" % json.dumps(o), args.target)
+    mark = "" if summary_mode(args) == "none" else "__dt.mark(), "  # snapshot in the same evaluate
+    p = js_eval(args, "(%s__dt.pick(%s))" % (mark, json.dumps(o)), args.target)
     if not p.get("found"):
         what = args.selector or args.text
         raise CLIError("no visible element matches %r (index %d of %d). Clickable labels: %s"
@@ -1424,7 +1512,8 @@ def cmd_click(args):
 
 def cmd_text(args):
     o = {"selector": args.selector, "after": args.after, "before": args.before, "grep": args.grep,
-         "context": args.context, "max": args.max, "offset": args.offset, "hidden": args.hidden}
+         "context": args.context, "max": args.max, "offset": args.offset, "hidden": args.hidden,
+         "changed": args.changed}
     r = js_eval(args, "__dt.text(%s)" % json.dumps({k: v for k, v in o.items() if v}), args.target)
     sys.stdout.write(r["text"] + "\n")
     if r["more"]:
@@ -1515,8 +1604,14 @@ def cmd_run(args):
     if args.target:  # pin the tab once: a URL selector may stop matching after a nav step
         args.target = check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]["targetId"]
     rc = 0
+    parsed = [shlex.split(l, posix=True) for l in steps]
+    actions = [i for i, t in enumerate(parsed, 1) if t and t[0] in ("click", "nav", "key")]
+    mode = args.summary or os.environ.get(SUMMARY_ENV)
     for i, line in enumerate(steps, 1):
-        toks = shlex.split(line, posix=True)
+        toks = parsed[i - 1]
+        # only the last action step reports a change summary, unless --summary full
+        if i in actions and "--summary" not in toks and mode != "full" and (i != actions[-1] or mode == "none"):
+            toks += ["--summary", "none"]
         if toks and toks[0] in ("run", "start", "stop"):
             raise CLIError("step %d: %r is not allowed inside run" % (i, toks[0]))
         if args.target and toks and toks[0] in TARGETED and "-t" not in toks and "--target" not in toks:
@@ -1546,6 +1641,8 @@ def cmd_type(args):
 
 
 def cmd_key(args):
+    if summary_mode(args) != "none":
+        js_eval(args, "__dt.mark()", args.target)
     for combo in args.keys:
         parts = combo.split("+")
         key, mods = parts[-1], 0
@@ -1654,6 +1751,8 @@ def add_wait_flags(p, settle_default=True):
     g.add_argument("--strict-settle", action="store_true",
                    help="old rules: any request type/origin and resource loads count; no cap")
     g.add_argument("--timeout", type=float, default=15, help="max seconds for load and condition (default 15)")
+    g.add_argument("--summary", choices=("brief", "full", "none"),
+                   help="change summary after the action (default brief, or $%s)" % SUMMARY_ENV)
     g.add_argument("--show", nargs="?", const="", metavar="AFTER",
                    help="print visible text afterwards (optionally only after marker AFTER)")
     g.add_argument("--max", type=int, default=4000, help="max chars for --show (default 4000)")
@@ -1731,6 +1830,8 @@ def main(argv=None, nested=False):
     p.add_argument("--max", type=int, default=8000, help="max chars (default 8000)")
     p.add_argument("--offset", type=int, default=0, help="skip this many chars (paging)")
     p.add_argument("--hidden", action="store_true", help="include invisible text")
+    p.add_argument("--changed", action="store_true",
+                   help="only lines added since the last text read of this page (+ removed count)")
     p.set_defaults(fn=cmd_text)
     p = sub.add_parser("wait", help="wait for a condition and/or network+DOM quiet (instead of sleep)")
     tgt(p, True); add_wait_flags(p)
@@ -1747,6 +1848,8 @@ def main(argv=None, nested=False):
     p.add_argument("--max", type=int, default=8000); p.set_defaults(fn=cmd_body)
     p = sub.add_parser("run", help="run CLI steps from FILE or - (one per line) in one process")
     p.add_argument("file"); tgt(p); p.add_argument("--keep-going", action="store_true")
+    p.add_argument("--summary", choices=("brief", "full", "none"),
+                   help="brief (default): change summary on the last action step only; full: every action step")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("pdf"); p.add_argument("file"); tgt(p, True)
     p.add_argument("-p", action="append", metavar="KEY=VALUE", help="Page.printToPDF param")

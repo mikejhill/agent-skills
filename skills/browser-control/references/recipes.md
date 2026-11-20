@@ -44,6 +44,20 @@ print a `warning:` line on stderr. Polling in-page is still possible:
 C eval "await new Promise((ok, no) => { const t0 = Date.now(); (function f(){ const e = __dt.qsa('#result')[0]; if (e) ok(e.innerText); else if (Date.now() - t0 > 10000) no(new Error('timeout')); else setTimeout(f, 100); })(); })" -t T
 ```
 
+## Change summaries
+
+```
+C click --text Save -t T
+# {"clicked": "Save", ..., "changes": {"added": ["Saved"], "removed": 1, "alerts": ["Saved"]}}
+C click --text Next -t T
+# {"changes": {"url": ".../step2", "added": ["Step 2 of 3", ...], "more": "+40 more lines: text --after \"...\""}}
+C text -t T --changed                             # only lines new since the last `text` read
+```
+
+A new document gives `url`, `title`, `head` (first 6 lines). Nothing changed gives
+`{"changed": false}`. `"settled": false` means the page may still be loading. In `run`, only
+the last `click`/`nav`/`key` step reports a summary unless `run --summary full`.
+
 ## Multi-step runs
 
 `run` executes CLI lines in one process (shared `-t`, `##` headers per step, stops at the

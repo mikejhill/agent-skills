@@ -90,6 +90,11 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
   `"settle": "capped"`.
 - **Wait for the state you need.** `--for-text`, `--for-selector`, `--for-gone` or
   `--for-url` return as soon as it holds (no settle unless `--settle`): the fastest wait.
+- **Actions report what changed.** `click`, `nav` and `key` return `changes`: on a new page
+  `url`, `title` and the first 6 lines; otherwise `added` lines, `removed` count, `focus`,
+  `new_controls`, `alerts`, or `{"changed": false}` (max 1200 chars; `more` points to the
+  rest). Act on it instead of calling `text` again. `text --changed` gives lines added since
+  your last `text` read. `--summary full|none` (or `BROWSER_CONTROL_SUMMARY`) widens or drops it.
 - **Read action output; never discard it** (`>/dev/null`, `| Out-Null`). `"timeout"`,
   `"settle": "capped"` and `"busy": ["host:count"]` say the page may not be ready.
 - **Read with `text`, not `innerText`.** `text` pierces shadow DOM and same-origin iframes
@@ -133,7 +138,7 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `type TEXT -t T [-s SELECTOR] [--replace]` | Real text input into focused / selected element |
 | `key KEY... -t T [--settle]` | `Enter`, `Tab`, `Escape`, `ArrowDown`, `ctrl+a`, `x`, ... |
 | `wait -t T [WAIT]` | Settle and/or wait for a condition |
-| `text -t T [--after M] [--grep RE] [--max N]` | Visible text incl. shadow DOM, as plain lines |
+| `text -t T [--after M] [--grep RE] [--max N] [--changed]` | Visible text incl. shadow DOM, as plain lines; `--changed`: only lines new since the last read |
 | `eval EXPR -t T` | Run JS in the page; returns JSON value (nodes described). Top-level `await`, `let`, `@file.js`, `-` |
 | `net -t T [--grep S] [--since N] [--all]` | Recent XHR/fetch/document responses: `id status type mime url` |
 | `body ID -t T [-o FILE]` / `body SUBSTR --url` | Response body (by request id or URL substring) |
@@ -147,7 +152,8 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 
 `WAIT` = `--for-text T`, `--for-selector CSS`, `--for-gone T`, `--for-url S`, `--no-settle`,
 `--settle`, `--quiet SEC` (0.3), `--settle-max SEC` (5), `--strict-settle`, `--timeout SEC`
-(15, load and condition), `--show [MARKER]` (print visible text after waiting).
+(15, load and condition), `--show [MARKER]` (print visible text after waiting),
+`--summary brief|full|none` (change summary; actions only).
 
 **Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
 commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).

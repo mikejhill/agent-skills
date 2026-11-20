@@ -52,6 +52,9 @@ EXTRA = {
   document.getElementById('s').textContent = 'step ' + i;
   if (i < 4) await new Promise(r => setTimeout(r, 150)); }
   document.body.insertAdjacentHTML('beforeend', '<p>Chain done</p>'); })();</script>""",
+    "/long": "<!doctype html><title>Long</title><button id=more>More</button><div id=out></div><script>"
+             "more.onclick = () => { for (let i = 0; i < 60; i++) out.insertAdjacentHTML('beforeend', "
+             "'<p>Row ' + i + ' ' + 'x'.repeat(200) + '</p>'); };</script>",
     "/late": "<!doctype html><title>Late</title><h1>Late</h1><script>setTimeout(() => "
              "document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>'), 800)</script>" + BEACON,
 }

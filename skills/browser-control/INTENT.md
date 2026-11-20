@@ -59,3 +59,10 @@ the purpose.
   anything changes (timer-driven UI). New `--settle-max` (5 s, returns `"settle": "capped"`
   with `busy` hosts and a stderr warning), `--for-*` replaces settling unless `--settle`,
   `--strict-settle` keeps the old rules. Simple nav 0.66 -> 0.46 s on the fixture.
+- 2026-11-20: [agent] Change summaries: 52 of 147 calls in the study only looked at the page,
+  17 right after an action. `click`/`nav`/`key` now return `changes` (added lines, removed
+  count, focus, new controls, alerts; capped at 1200 chars), computed in the settle call;
+  click snapshots in its existing pick evaluate. `text --changed` diffs against the last
+  `text` read. `--summary brief|full|none`, `BROWSER_CONTROL_SUMMARY`; `run` summarizes only
+  its last action step. Dialog reporting from the design was left out (needs Page events on
+  every tab).

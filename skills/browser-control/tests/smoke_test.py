@@ -109,6 +109,9 @@ def main():
         code, o, e = r.cli("click", "--text", "Browse", "-t", tid, "--show", "Choose a Product")
         res = json.loads(o) if code == 0 else {}
         r.check("click --text settles past timer+fetch", "Item G" in res.get("text", ""), o + e)
+        r.check("click returns a change summary with the new lines",
+                "Item A" in res.get("changes", {}).get("added", []) and "Return to Home" in res["changes"].get("new_controls", [])
+                and res["changes"].get("url", "").endswith("#items"), o + e)
         code, o, e = r.cli("net", "-t", tid, "--grep", "/api/items")
         r.check("net lists the XHR", "/api/items" in o and " 200 Fetch " in o, o + e)
         rid = o.split()[0]
@@ -195,6 +198,31 @@ def main():
         res = json.loads(o) if code == 0 else {}
         r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
                 0.6 < res.get("waited", 0) < 1.1 and "settle" not in res, o + e)
+        # change summary and text --changed
+        code, o, e = r.cli("nav", base + "long", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("nav summary is url/title/head", res.get("changes", {}).get("title") == "Long"
+                and res["changes"].get("head") == ["More"], o + e)
+        code, o, e = r.cli("text", "-t", tid, "--max", "50")
+        code, o, e = r.cli("click", "#more", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        ch = res.get("changes", {})
+        r.check("long summary stays under 1200 chars with a pointer to the rest",
+                len(json.dumps(ch)) <= 1200 and "Row 0" in ch.get("added", [""])[0]
+                and "more lines: text --after" in ch.get("more", ""), o + e)
+        code, o, e = r.cli("text", "-t", tid, "--changed", "--max", "100000")
+        r.check("text --changed lists only lines added since the last read",
+                code == 0 and o.count("Row ") == 60 and "More" not in o, o + e)
+        code, o, e = r.cli("text", "-t", tid, "--changed")
+        r.check("text --changed with no change", "[no change since the last text read]" in o, o + e)
+        code, o, e = r.cli("click", "#out p", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("no-op click returns changed: false", res.get("changes") == {"changed": False}, o + e)
+        code, o, e = r.cli("click", "#out p", "-t", tid, "--summary", "none")
+        r.check("--summary none omits the summary", code == 0 and "changes" not in json.loads(o), o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click '#out p'\nclick '#out p'")
+        r.check("run: summary only on the last action step", o.count('"changes"') == 1
+                and o.rindex('"changes"') > o.index("## 2"), o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
         r.cli("stop")
