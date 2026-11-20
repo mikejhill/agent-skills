@@ -12,8 +12,9 @@ job is completing the task in the browser, not debugging it.
 
 `scripts/browser.py` (Python 3.8+, stdlib only) is the CLI. It talks to a **broker**: a
 windowless background process holding the **one** connection to the browser. The browser
-asks the user to approve each new connection, so one broker = one approval for the whole
-task. The broker exits on `stop`, after 15 idle minutes, or when the browser closes.
+asks the user to approve each new connection, so one broker = one approval for as long as it
+runs, across tasks. The broker exits on `stop`, after 60 idle minutes, or when the browser
+closes.
 
 ```text
 python scripts/browser.py <command> ...        # Windows: python or py -3; else python3
@@ -32,16 +33,23 @@ exit code 2 (3 = browser control not enabled).
      needed. `browser.py enable-help --launch edge|chrome` opens that page for them.
      Agents cannot toggle it; never relaunch the user's browser with flags.
    - Several endpoints → pass `--browser edge|chrome|brave|...` on every call.
-2. **Warn, then start:** tell the user *"Your browser will ask to allow remote debugging;
-   click Allow"*, then run `browser.py start`. It blocks (up to 120 s) until they approve.
-   Any command auto-starts the broker, but start explicitly so the prompt is expected.
+2. **Start first, then plan:** if `status` shows the broker `connected`, skip this step: no
+   prompt is needed. Otherwise tell the user *"Your browser will ask to allow remote
+   debugging; click Allow"* and run `browser.py start` before anything else in the task. It
+   blocks (up to 120 s) until they approve; if you can run it in the background, do, and
+   prepare the rest of the task meanwhile. Any command auto-starts the broker, but start
+   explicitly so the prompt is expected.
 3. **Pick the tab:** when the user points at a tab they have open ("my GitHub tab", "the
    page I'm on"), take over that tab: `which -t github.com` (or `-t active`) to confirm
    the match, then use the returned `id`. Otherwise `open URL --reuse` (reuses a tab
    already at that URL) or `open URL`. See *Existing tabs*.
 4. **Work:** act and read with `-t ID` (see *Working fast*).
-5. **Stop:** `browser.py stop` when the task is done, including after errors. Don't leave it
-   to the idle timeout. Stopping removes the browser's "being controlled" banner.
+5. **Keep it running between tasks:** every new broker costs the user another approval
+   prompt, so don't `stop` just because one task finished. Run `browser.py stop` when the
+   user says they are done with the browser or asks to remove the "being controlled"
+   banner, or before switching to another browser. Otherwise the broker exits by itself
+   after 60 idle minutes (`start --idle SEC` or `BROWSER_CONTROL_IDLE` changes that; it
+   also updates a running broker).
 
 ## Existing tabs
 
@@ -110,7 +118,7 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | Command | Does |
 |---|---|
 | `status` | Detected browsers + broker state (never prompts) |
-| `start [--idle SEC]` / `stop` | Start / stop broker |
+| `start [--idle SEC]` / `stop` | Start broker (or reuse the running one; `--idle` resets its timeout) / stop it |
 | `targets [--all] [--grep S] [--focus]` | Tabs: `id`, `title`, `url` (`--all` adds workers, iframes, extensions) |
 | `which -t T` | The tab `T` resolves to (`id`, `title`, `url`); errors list candidates |
 | `activate -t T` / `close -t T` | Bring tab to front / close it |

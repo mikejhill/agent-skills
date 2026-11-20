@@ -6,7 +6,7 @@ user approves the browser's "Allow remote debugging?" prompt once per session, n
 per command. Every CLI call talks to the broker over a token-protected localhost socket.
 
     browser.py status                      endpoint detection + broker state
-    browser.py start [--idle 900]          start broker (other commands auto-start it)
+    browser.py start [--idle 3600]         start broker (other commands auto-start it)
     browser.py stop                        stop broker (closes the WebSocket)
     browser.py targets [--all] [--grep S] [--focus]   list tabs (id, type, title, url)
     browser.py which -t TARGET             show which tab TARGET resolves to
@@ -48,7 +48,10 @@ import urllib.request
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
-DEFAULT_IDLE = 900  # seconds without a CLI request before the broker exits
+DEFAULT_IDLE = 3600  # seconds without a CLI request before the broker exits
+# A new broker means a new approval prompt in the browser, so the default is long; override
+# with BROWSER_CONTROL_IDLE (seconds) or `start --idle`.
+IDLE_ENV = "BROWSER_CONTROL_IDLE"
 CONNECT_WAIT = 120  # seconds to wait for the user to approve the browser prompt
 EVENT_BUFFER = 20000  # Network.enable on a busy SPA emits thousands of events per page
 INFLIGHT_MAX_AGE = 10.0  # ignore requests open longer than this (long-poll, streaming)
@@ -184,6 +187,21 @@ def with_dt(expr):
 
 
 # --------------------------------------------------------------------------- paths
+
+def positive_int(v):
+    n = int(v)
+    if n <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return n
+
+
+def default_idle():
+    try:
+        v = int(os.environ.get(IDLE_ENV, ""))
+        return v if v > 0 else DEFAULT_IDLE
+    except ValueError:
+        return DEFAULT_IDLE
+
 
 def state_dir():
     if os.environ.get("BROWSER_CONTROL_HOME"):  # isolate test brokers from the real one
@@ -658,6 +676,9 @@ class Broker:
                     "pid": os.getpid(), "uptime": round(time.time() - self.started),
                     "idle_timeout": self.idle, "idle_for": round(time.time() - self.last_activity),
                     "sessions": len(self.sessions), "event_seq": self.seq}
+        if op == "idle":  # `start --idle N` on a running broker
+            self.idle = int(req["idle"])
+            return {"idle_timeout": self.idle}
         if op == "stop":
             self.exit_reason = "stop requested"
             self.stopping.set()
@@ -946,7 +967,7 @@ def ensure_broker(args, quiet=False):
     if True:  # always tell the agent, even on auto-start: the user may need to click Allow
         sys.stderr.write("starting broker for %s (port %s). If the browser shows "
                          "'Allow remote debugging?', click Allow.\n" % (ep["name"], ep["port"]))
-    spawn_broker(ep, getattr(args, "idle", None) or DEFAULT_IDLE)
+    spawn_broker(ep, getattr(args, "idle", None) or default_idle())
     end = time.time() + 10
     while time.time() < end:
         st = read_state()
@@ -1063,6 +1084,11 @@ def cmd_status(args):
 
 def cmd_start(args):
     st = ensure_broker(args)
+    if args.idle:  # also applies to a broker that was already running
+        r = rpc({"op": "idle", "idle": args.idle}, st)
+        if "error" in r:  # a broker started by an older browser.py has no `idle` op
+            sys.stderr.write("warning: the running broker predates `start --idle` updates; it keeps its "
+                             "current idle timeout until it exits and restarts\n")
     out(rpc({"op": "status"}, st), args)
 
 
@@ -1538,8 +1564,9 @@ def main(argv=None, nested=False):
                        help="tab: id or prefix, active, url:S, title:S, URL, host, or URL/title substring")
 
     sub.add_parser("status").set_defaults(fn=cmd_status)
-    p = sub.add_parser("start"); p.add_argument("--idle", type=int, default=DEFAULT_IDLE,
-                                                help="exit after N idle seconds (default 900)")
+    p = sub.add_parser("start"); p.add_argument("--idle", type=positive_int,
+                                                help="exit after N idle seconds (default %d, or $%s); "
+                                                     "also updates a running broker" % (DEFAULT_IDLE, IDLE_ENV))
     p.set_defaults(fn=cmd_start)
     sub.add_parser("stop").set_defaults(fn=cmd_stop)
     p = sub.add_parser("targets", help="list open tabs")

@@ -94,6 +94,12 @@ def main():
         print("browser:", chrome)
         code, o, e = r.cli("start", "--idle", "120")
         r.check("start", code == 0 and '"connected"' in o, e)
+        r.check("start --idle sets the timeout", json.loads(o).get("idle_timeout") == 120, o)
+        code, o, e = r.cli("start", "--idle", "300")
+        r.check("start --idle updates a running broker", code == 0 and json.loads(o).get("idle_timeout") == 300
+                and "starting broker" not in e, o + e)
+        code, o, e = r.cli("start", "--idle", "0")
+        r.check("start --idle rejects 0", code == 2 and "positive" in e, o + e)
         code, o, e = r.cli("open", "http://127.0.0.1:%d/" % web)
         tid = json.loads(o)["targetId"]
         code, o, e = r.cli("wait", "-t", tid, "--for-text", "Browse")
