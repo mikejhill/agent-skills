@@ -104,11 +104,15 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 - **Click by label:** `click --text Edit --within "Shipping address"` finds visible
   buttons, links and roles by text (also in shadow DOM). A miss lists the clickable labels.
 - **Chain steps in one call** with `run` (one CLI command per line, `-t` applied to all,
-  stops at the first error). Do one `run` per page transition, then read its output:
+  stops at the first error). One call per page transition; batch only steps whose outcome
+  you can predict, guard them with `--expect-text`/`--expect-selector`/`--expect-url` (a
+  miss stops the run), and end with the step whose change summary you need. Never batch
+  past a submit the user must confirm. Output shows `## N ok` for passing steps and full
+  output for a failing step and the last one (`--echo all` for everything):
 
   ```text
   browser.py run - -t shop <<'EOF'
-  click --text Checkout
+  click --text Checkout --expect-text "Shipping"
   click --text Continue --for-text "Order summary"
   text --after "Order summary" --max 6000
   EOF
@@ -151,7 +155,7 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `eval EXPR -t T` | Run JS in the page; returns JSON value (nodes described). Top-level `await`, `let`, `@file.js`, `-` |
 | `net -t T [--grep S] [--since N] [--all]` | Recent XHR/fetch/document responses: `id status type mime url` |
 | `body ID -t T [-o FILE]` / `body SUBSTR --url` | Response body (by request id or URL substring) |
-| `run FILE\|- [-t T] [--keep-going]` | Run CLI steps (one per line) in one process |
+| `run FILE\|- [-t T] [--keep-going] [--echo last\|all]` | Run CLI steps (one per line) in one process |
 | `screenshot FILE -t T [--full]` | PNG/JPEG (by extension); `--full` = whole page |
 | `pdf FILE -t T [-p k=v]` | Print to PDF |
 | `send METHOD [JSON] [-p k=v ...] [-t T]` | Any low-level browser command (cookies, storage, emulation, ...). Prints `result` |
@@ -162,7 +166,8 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 `WAIT` = `--for-text T`, `--for-selector CSS`, `--for-gone T`, `--for-url S`, `--no-settle`,
 `--settle`, `--quiet SEC` (0.3), `--settle-max SEC` (5), `--strict-settle`, `--timeout SEC`
 (15, load and condition), `--show [MARKER]` (print visible text after waiting),
-`--summary brief|full|none` (change summary; actions only).
+`--summary brief|full|none` (change summary; actions only), `--expect-text T`,
+`--expect-selector CSS`, `--expect-url S` (exit 1 unless true afterwards).
 
 **Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
 commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).

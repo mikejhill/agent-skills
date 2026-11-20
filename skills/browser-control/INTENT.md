@@ -71,3 +71,9 @@ the purpose.
   [--rows CSS]` covers text, attributes (absolute URLs), `::all`, `::count` and `::html`, with
   `missing` counts, an 8000-char cap, `--format tsv`, and candidate containers when `--rows`
   matches nothing. One evaluate, no broker change.
+- 2026-11-20: [agent] `run` refinements (modest win: agents already chain with `;`, and
+  batching hides intermediate state). `--echo last` (default) prints one line per passing
+  step and full output for a failing or last step; `--echo all` is the old output.
+  `--expect-text`/`--expect-selector`/`--expect-url` on click/nav/key/wait fail the step
+  (exit 1) when unmet, so a wrong click stops a batch. SKILL.md: one call per page
+  transition, batch only predictable steps, never past a submit the user must confirm.

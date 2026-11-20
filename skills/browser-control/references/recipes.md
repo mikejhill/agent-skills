@@ -75,9 +75,11 @@ the last `click`/`nav`/`key` step reports a summary unless `run --summary full`.
 
 ## Multi-step runs
 
-`run` executes CLI lines in one process (shared `-t`, `##` headers per step, stops at the
-first failing step unless `--keep-going`). Use it for each page transition: action, wait,
-read.
+`run` executes CLI lines in one process (shared `-t`, stops at the first failing step
+unless `--keep-going`). Use it for each page transition: action, wait, read. By default
+(`--echo last`) passing steps print one `## N ok ...` line; a failing step and the last
+step print in full. `--expect-text`/`--expect-selector`/`--expect-url` on a step fail it
+(exit 1) when the page doesn't show what you predicted, so a wrong click stops the batch.
 
 ```
 C run - -t T <<'EOF'

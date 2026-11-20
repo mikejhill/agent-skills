@@ -36,6 +36,7 @@ need no target.
 import argparse
 import base64
 import collections
+import io
 import json
 import os
 import secrets
@@ -1442,7 +1443,7 @@ def cmd_nav(args):
     res = {"frameId": r.get("frameId"), "loaded": (bool(ev) or same_doc) if not args.no_wait else None}
     if args.no_wait:
         return out(res, args)
-    out(after_action(args, res, nav=True), args)
+    return emit(args, after_action(args, res, nav=True))
 
 
 def cmd_screenshot(args):
@@ -1532,7 +1533,29 @@ def after_action(args, res, nav=False):
         if args.show:
             o["after"] = args.show
         res["text"] = js_eval(args, "__dt.text(%s)" % json.dumps(o), args.target)["text"]
+    return check_expect(args, res)
+
+
+def expect_opts(args):
+    o = {k: getattr(args, a) for k, a in (("text", "expect_text"), ("selector", "expect_selector"),
+                                          ("url", "expect_url")) if getattr(args, a, None)}
+    return o or None
+
+
+def check_expect(args, res):
+    """--expect-*: one check after waiting; a miss fails the step (stops a `run`)."""
+    o = expect_opts(args)
+    if o and not js_eval(args, "__dt.has(%s)" % json.dumps(o), args.target):
+        res["expect_failed"] = o
     return res
+
+
+def emit(args, res):
+    out(res, args)
+    if res.get("expect_failed"):
+        sys.stderr.write("error: expectation not met: %s\n" % json.dumps(res["expect_failed"]))
+        return 1
+    return 0
 
 
 def cmd_click(args):
@@ -1559,7 +1582,7 @@ def cmd_click(args):
     else:  # covered, zero-size, or --dom: element.click() (untrusted, but no hit-testing)
         js_eval(args, "__dt.last.click()", args.target)
         res["via"] = "dom"
-    out(after_action(args, res), args)
+    return emit(args, after_action(args, res))
 
 
 def cmd_text(args):
@@ -1627,8 +1650,8 @@ def cmd_wait(args):
         if args.show:
             o["after"] = args.show
         res["text"] = js_eval(args, "__dt.text(%s)" % json.dumps(o), args.target)["text"]
-    out(res, args)
-    return 0 if w["ok"] else 1
+    check_expect(args, res)
+    return emit(args, res) or (0 if w["ok"] else 1)
 
 
 def responses(args):
@@ -1709,9 +1732,22 @@ def cmd_run(args):
             raise CLIError("step %d: %r is not allowed inside run" % (i, toks[0]))
         if args.target and toks and toks[0] in TARGETED and "-t" not in toks and "--target" not in toks:
             toks += ["-t", args.target]
-        sys.stdout.write("## %d %s\n" % (i, line[:120]))
-        sys.stdout.flush()
-        code = main(glob + toks, nested=True)
+        last = i == len(steps)
+        if args.echo == "all":
+            sys.stdout.write("## %d %s\n" % (i, line[:120]))
+            sys.stdout.flush()
+            code = main(glob + toks, nested=True)
+        else:  # last: one line per passing step; full output for a failing step and the last one
+            buf, real = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                code = main(glob + toks, nested=True)
+            finally:
+                sys.stdout = real
+            if code or last:
+                sys.stdout.write("## %d %s\n%s" % (i, line[:120], buf.getvalue()))
+            else:
+                sys.stdout.write("## %d ok %s\n" % (i, line[:80]))
         sys.stdout.flush()
         if code:
             rc = code
@@ -1754,7 +1790,7 @@ def cmd_key(args):
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyDown" if text else "rawKeyDown",
                                                        **({"text": text} if text else {})), args.target))
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyUp"), args.target))
-    out(after_action(args, {"pressed": args.keys}), args)
+    return emit(args, after_action(args, {"pressed": args.keys}))
 
 
 def cmd_pdf(args):
@@ -1844,6 +1880,9 @@ def add_wait_flags(p, settle_default=True):
     g.add_argument("--strict-settle", action="store_true",
                    help="old rules: any request type/origin and resource loads count; no cap")
     g.add_argument("--timeout", type=float, default=15, help="max seconds for load and condition (default 15)")
+    g.add_argument("--expect-text", metavar="TEXT", help="fail (exit 1, stops a run) unless TEXT is visible afterwards")
+    g.add_argument("--expect-selector", metavar="CSS", help="fail unless a visible element matches CSS afterwards")
+    g.add_argument("--expect-url", metavar="SUBSTR", help="fail unless location.href contains SUBSTR afterwards")
     g.add_argument("--summary", choices=("brief", "full", "none"),
                    help="change summary after the action (default brief, or $%s)" % SUMMARY_ENV)
     g.add_argument("--show", nargs="?", const="", metavar="AFTER",
@@ -1953,6 +1992,8 @@ def main(argv=None, nested=False):
     p.add_argument("file"); tgt(p); p.add_argument("--keep-going", action="store_true")
     p.add_argument("--summary", choices=("brief", "full", "none"),
                    help="brief (default): change summary on the last action step only; full: every action step")
+    p.add_argument("--echo", choices=("last", "all"), default="last",
+                   help="last (default): full output only for a failing step and the last step; all: every step")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("pdf"); p.add_argument("file"); tgt(p, True)
     p.add_argument("-p", action="append", metavar="KEY=VALUE", help="Page.printToPDF param")

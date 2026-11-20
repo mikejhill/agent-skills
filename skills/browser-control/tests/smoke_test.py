@@ -126,9 +126,20 @@ def main():
             "click --text Yes --within 'Discard your changes' --for-text Welcome",
             "eval location.hash",
         ])
-        code, o, e = r.cli("run", "-", "-t", tid, stdin=steps)
+        code, o, e = r.cli("run", "-", "-t", tid, "--echo", "all", stdin=steps)
         r.check("run: hidden detail appears after settle", "Weight 1000 g" in o, o + e)
         r.check("run: dialog round trip", code == 0 and '"#home"' in o, o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text Browse --for-text 'Item G'\n"
+                           "click --text 'Show more' --index 1\ntext --grep Weight")
+        r.check("run --echo last: short output, last step in full", code == 0 and len(o) < 500
+                and "## 1 ok " in o and "Weight 1000 g" in o, o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text 'Add to cart' --expect-text 'Cart (1)'\n"
+                           "eval 1")
+        r.check("run: failed --expect-text stops the run", code == 1 and "expectation not met" in e
+                and "## 2" not in o and '"expect_failed"' in o, o + e)
+        code, o, e = r.cli("wait", "-t", tid, "--no-settle", "--expect-url", "#items", "--expect-selector", "x-card")
+        r.check("--expect-* passes when met", code == 0 and "expect_failed" not in o, o + e)
+        r.cli("nav", "http://127.0.0.1:%d/#home" % web, "-t", tid, "--for-text", "Welcome")
         code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text Nope --no-settle\neval 1")
         r.check("run stops on first error with candidates", code == 2 and "Clickable labels: " in e
                 and "## 2" not in o, o + e)
