@@ -223,6 +223,27 @@ def main():
         code, o, e = r.cli("run", "-", "-t", tid, stdin="click '#out p'\nclick '#out p'")
         r.check("run: summary only on the last action step", o.count('"changes"') == 1
                 and o.rindex('"changes"') > o.index("## 2"), o + e)
+        # extract
+        r.cli("nav", base + "list", "-t", tid, "--summary", "none")
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".res", "--limit", "4", "sku=@data-sku",
+                           "name=h2", "price=.price", "url=a@href", "tags=.tag::all", "n=.tag::count")
+        res = json.loads(o) if code == 0 else {}
+        row = (res.get("rows") or [{}])[0]
+        r.check("extract rows: text, @attr, absolute href, ::all, ::count", res.get("count") == 6
+                and len(res["rows"]) == 4 and row == {"sku": "S1", "name": "Product 1", "price": "$3.00",
+                "url": base + "p/1", "tags": ["new", "sale"], "n": 2}, o + e)
+        r.check("extract: missing fields are null and counted", res.get("missing") == {"price": 1}
+                and res["rows"][2]["price"] is None, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "title=h1")
+        r.check("extract without --rows", code == 0 and json.loads(o) == {"title": "Results"}, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".nope", "name=h2")
+        r.check("extract: zero rows exits 2 with candidate containers", code == 2
+                and "div[data-sku] (6)" in e, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", "div[", "name=h2")
+        r.check("extract: bad selector exits 2 and names it", code == 2 and "'div['" in e, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".res", "--format", "tsv", "sku=@data-sku", "price=.price")
+        r.check("extract --format tsv", code == 0 and o.splitlines()[:2] == ["sku\tprice", "S1\t$3.00"]
+                and len(o.splitlines()) == 7, o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
         r.cli("stop")

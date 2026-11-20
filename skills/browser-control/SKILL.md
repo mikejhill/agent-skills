@@ -115,6 +115,14 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
   ```
 
   PowerShell: pipe a here-string, `@'...'@ | python $b run - -t shop`.
+- **Extract, don't hand-write scrapers.** `extract` takes short `NAME=SPEC` fields instead
+  of inline `eval` JS (long commands cost model time):
+
+  ```text
+  browser.py extract -t shop --rows "div[data-component-type=s-search-result]" --limit 16 \
+    asin=@data-asin title=h2 price=".a-price .a-offscreen" url="h2 a@href"
+  ```
+
 - **Prefer the app's JSON.** SPA data usually arrives by XHR: after any `click`/`nav`
   (they enable network capture), `net -t T` lists responses and
   `body ID -t T -o orders.json` (or `body /api/orders --url`) saves one. Parse the file
@@ -139,6 +147,7 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `key KEY... -t T [--settle]` | `Enter`, `Tab`, `Escape`, `ArrowDown`, `ctrl+a`, `x`, ... |
 | `wait -t T [WAIT]` | Settle and/or wait for a condition |
 | `text -t T [--after M] [--grep RE] [--max N] [--changed]` | Visible text incl. shadow DOM, as plain lines; `--changed`: only lines new since the last read |
+| `extract NAME=SPEC... -t T [--rows CSS] [--limit N] [--format tsv]` | Fields from the page or each row: `CSS` (text), `CSS@attr`, `@attr` (row), `CSS::all\|count\|html` |
 | `eval EXPR -t T` | Run JS in the page; returns JSON value (nodes described). Top-level `await`, `let`, `@file.js`, `-` |
 | `net -t T [--grep S] [--since N] [--all]` | Recent XHR/fetch/document responses: `id status type mime url` |
 | `body ID -t T [-o FILE]` / `body SUBSTR --url` | Response body (by request id or URL substring) |

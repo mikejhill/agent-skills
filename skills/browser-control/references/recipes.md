@@ -44,6 +44,21 @@ print a `warning:` line on stderr. Polling in-page is still possible:
 C eval "await new Promise((ok, no) => { const t0 = Date.now(); (function f(){ const e = __dt.qsa('#result')[0]; if (e) ok(e.innerText); else if (Date.now() - t0 > 10000) no(new Error('timeout')); else setTimeout(f, 100); })(); })" -t T
 ```
 
+## Extract
+
+```
+C extract -t T title=h1 price="#price" image="#main img@src"         # one object
+C extract -t T --rows "li.result" --limit 20 name=h3 url="a@href" id=@data-id tags=".tag::all"
+# {"rows": [{...}], "count": 37, "missing": {"price": 2}}
+C extract -t T --rows "tr" --format tsv cells="td::all"              # header + one line per row
+```
+
+- Fields are scoped to each row; visible elements only unless `--hidden`.
+- Text is whitespace-collapsed and cut at `--max-field` (200); `href`/`src` are absolute.
+- A missing field is `null` and counted in `missing`; output is capped at 8000 chars
+  (`truncated`: rows dropped).
+- `--rows` matching nothing exits 2 and lists repeated containers to try.
+
 ## Change summaries
 
 ```

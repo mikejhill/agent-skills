@@ -19,6 +19,7 @@ per command. Every CLI call talks to the broker over a token-protected localhost
     browser.py click SELECTOR -t TARGET    trusted mouse click at element center
     browser.py type TEXT -t TARGET [-s SELECTOR] [--replace]
     browser.py key Enter [ctrl+a ...] -t TARGET
+    browser.py extract -t TARGET NAME=SPEC... [--rows CSS]   structured fields / rows
     browser.py screenshot FILE -t TARGET [--full]
     browser.py pdf FILE -t TARGET [-p landscape=true ...]
     browser.py events [-t T] [-f PREFIX] [--since N] [--wait S] [--count N]
@@ -72,7 +73,7 @@ SLD_SUFFIXES = {"co", "com", "net", "org", "gov", "ac", "edu", "ne", "or", "go",
 # In-page helper library, (re)defined idempotently before every eval, so it survives
 # navigations and SPA reloads with no separate injection step. Everything pierces open
 # shadow roots and same-origin iframes. Exposed to `eval` code as `__dt`.
-DT_VERSION = 5
+DT_VERSION = 6
 DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG']);
   const CLICKABLE = 'a,button,summary,label,select,option,input[type=button],input[type=submit],' +
@@ -154,6 +155,57 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
   const snap = () => ({ url: location.href, title: document.title, focus: focusLabel(),
     lines: deepText().split('\n').filter(Boolean),
     controls: qsa(CONTROLS).filter(vis).map(label).filter(Boolean), alerts: alertTexts() });
+  // extract: structured fields from the page or from each repeated row (see cmd_extract).
+  const parseSpec = spec => {
+    let m = /^(.*)::(html|all|count)$/.exec(spec), mode = 'text', attr = null;
+    if (m) { spec = m[1]; mode = m[2]; }
+    m = /^(.*?)@([\w:-]+)$/.exec(spec);
+    if (m && (m[1].split('[').length === m[1].split(']').length)) { spec = m[1]; attr = m[2]; }
+    return { css: spec.trim(), mode, attr };
+  };
+  const extract = (o = {}) => {
+    const all = (css, root) => { try { return qsa(css, root); } catch (e) { throw { selector: css }; } };
+    const pickVis = l => o.hidden ? l : l.filter(vis);
+    const maxf = o.maxField || 200, cut = v => v.length > maxf ? v.slice(0, maxf - 1) + '\u2026' : v;
+    const val = (el, f) => {
+      if (f.attr) { let v = el.getAttribute(f.attr); if (v == null) return null;
+        if (['href', 'src', 'action'].includes(f.attr)) { try { v = new URL(v, document.baseURI).href; } catch (e) {} }
+        return cut(v); }
+      if (f.mode === 'html') return cut(el.innerHTML);
+      return cut(norm(el.innerText || el.textContent));
+    };
+    const fields = Object.entries(o.fields || {}).map(([k, v]) => [k, parseSpec(v)]);
+    const one = (root, isRow) => {
+      const r = {};
+      for (const [k, f] of fields) {
+        const els = f.css ? pickVis(all(f.css, root)).filter(e => e !== root) : (isRow ? [root] : []);
+        if (f.mode === 'count') { r[k] = els.length; continue; }
+        if (f.mode === 'all') { const v = els.map(e => val(e, f)).filter(x => x != null && x !== ''); r[k] = v.length ? v : null; continue; }
+        const v = els.length ? val(els[0], f) : null;
+        r[k] = v === '' ? null : v;
+      }
+      return r;
+    };
+    try {
+      if (!o.rows) return { value: one(document, false) };
+      const rows = pickVis(all(o.rows, document));
+      if (!rows.length) {
+        const sig = new Map();
+        for (const e of qsa('*')) {
+          if (!vis(e)) continue;
+          const data = [...e.attributes].map(a => a.name).find(n => n.startsWith('data-') && n !== 'data-reactid');
+          const cls = (e.getAttribute('class') || '').trim().split(/\s+/)[0];
+          const k = data ? e.tagName.toLowerCase() + '[' + data + ']' : cls ? e.tagName.toLowerCase() + '.' + cls : null;
+          if (k) sig.set(k, (sig.get(k) || 0) + 1);
+        }
+        return { norows: [...sig].filter(x => x[1] >= 5).sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0] + ' (' + x[1] + ')') };
+      }
+      const out = rows.slice(0, o.limit || 50).map(r => one(r, true));
+      const missing = {};
+      for (const r of out) for (const k in r) if (r[k] == null) missing[k] = (missing[k] || 0) + 1;
+      return { rows: out, count: rows.length, missing };
+    } catch (e) { if (e && e.selector) return { badSelector: e.selector }; throw e; }
+  };
   const mark = () => { globalThis.__dtBefore = snap(); return true; };
   const changes = (o = {}) => {
     const full = o.mode === 'full', cap = full ? 2400 : 1200, maxAdded = full ? 30 : 12;
@@ -251,7 +303,7 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
       (strict ? '|' + performance.getEntriesByType('resource').length : '');
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep, mark, changes };
+  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep, mark, changes, extract };
 })();
 void 0;
 """ % (DT_VERSION, DT_VERSION)
@@ -1521,6 +1573,47 @@ def cmd_text(args):
                          % (r["more"], r["total"], (args.offset or 0) + args.max))
 
 
+EXTRACT_CAP = 8000
+
+
+def cmd_extract(args):
+    fields = {}
+    for f in args.fields:
+        k, eq, v = f.partition("=")
+        if not eq or not k:
+            raise CLIError("field %r: use NAME=SPEC (CSS, CSS@attr, @attr, CSS::html|all|count)" % f)
+        fields[k] = v
+    if not fields:
+        raise CLIError("give at least one NAME=SPEC field")
+    o = {"fields": fields, "rows": args.rows, "limit": args.limit, "maxField": args.max_field, "hidden": args.hidden}
+    r = js_eval(args, "__dt.extract(%s)" % json.dumps(o), args.target)
+    if r.get("badSelector"):
+        raise CLIError("invalid CSS selector: %r" % r["badSelector"])
+    if "norows" in r:
+        raise CLIError("--rows %r matches no visible element. Repeated containers: %s"
+                       % (args.rows, "; ".join(r["norows"]) or "none found"))
+    if "value" in r:
+        return out(r["value"], args)
+    rows, truncated = r["rows"], 0
+    if args.format == "tsv":
+        cell = lambda v: "" if v is None else (" | ".join(map(str, v)) if isinstance(v, list) else str(v)).replace(
+            "\t", " ").replace("\n", " ")
+        lines = ["\t".join(fields)] + ["\t".join(cell(row.get(k)) for k in fields) for row in rows]
+        while len("\n".join(lines)) > EXTRACT_CAP and len(lines) > 1:
+            lines.pop(); truncated += 1
+        sys.stdout.write("\n".join(lines) + "\n")
+        if truncated or r["missing"]:
+            sys.stderr.write("rows %d of %d%s; missing %s\n" % (len(lines) - 1, r["count"],
+                             " (%d truncated)" % truncated if truncated else "", json.dumps(r["missing"])))
+        return
+    res = {"rows": rows, "count": r["count"], "missing": r["missing"]}
+    while len(json.dumps(res, ensure_ascii=False)) > EXTRACT_CAP and res["rows"]:
+        res["rows"] = res["rows"][:-1]; truncated += 1
+    if truncated:
+        res["truncated"] = truncated
+    out(res, args)
+
+
 def cmd_wait(args):
     cond = wait_opts(args)
     if args.ms:
@@ -1586,7 +1679,7 @@ def cmd_body(args):
     sys.stdout.write(txt[:args.max] + ("\n[... %d more chars; use -o FILE]\n" % more if more > 0 else "\n"))
 
 
-TARGETED = {"send", "eval", "nav", "click", "type", "key", "screenshot", "pdf", "events", "text",
+TARGETED = {"extract", "send", "eval", "nav", "click", "type", "key", "screenshot", "pdf", "events", "text",
             "wait", "net", "body", "batch", "which", "activate", "close"}
 
 
@@ -1833,6 +1926,16 @@ def main(argv=None, nested=False):
     p.add_argument("--changed", action="store_true",
                    help="only lines added since the last text read of this page (+ removed count)")
     p.set_defaults(fn=cmd_text)
+    p = sub.add_parser("extract", help="structured fields from the page or from repeated rows")
+    p.add_argument("fields", nargs="+", metavar="NAME=SPEC",
+                   help="SPEC: CSS (text), CSS@attr, @attr (row itself), CSS::html, CSS::all, CSS::count")
+    tgt(p, True)
+    p.add_argument("--rows", metavar="CSS", help="one result per matching element; fields are scoped to it")
+    p.add_argument("--limit", type=int, default=50, help="max rows (default 50)")
+    p.add_argument("--max-field", type=int, default=200, help="max chars per value (default 200)")
+    p.add_argument("--format", choices=("json", "tsv"), default="json")
+    p.add_argument("--hidden", action="store_true", help="include invisible elements")
+    p.set_defaults(fn=cmd_extract)
     p = sub.add_parser("wait", help="wait for a condition and/or network+DOM quiet (instead of sleep)")
     tgt(p, True); add_wait_flags(p)
     p.add_argument("--ms", type=int, default=0, help="fixed delay first (rarely needed)")

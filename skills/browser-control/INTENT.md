@@ -66,3 +66,8 @@ the purpose.
   `text` read. `--summary brief|full|none`, `BROWSER_CONTROL_SUMMARY`; `run` summarizes only
   its last action step. Dialog reporting from the design was left out (needs Page events on
   every tab).
+- 2026-11-20: [agent] `extract`: 59 of 88 `eval` calls in the study carried 400+ char inline
+  scrapers, and long commands cost ~0.34 s of model time per 100 chars. `extract NAME=SPEC
+  [--rows CSS]` covers text, attributes (absolute URLs), `::all`, `::count` and `::html`, with
+  `missing` counts, an 8000-char cap, `--format tsv`, and candidate containers when `--rows`
+  matches nothing. One evaluate, no broker change.

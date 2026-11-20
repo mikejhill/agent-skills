@@ -55,6 +55,10 @@ EXTRA = {
     "/long": "<!doctype html><title>Long</title><button id=more>More</button><div id=out></div><script>"
              "more.onclick = () => { for (let i = 0; i < 60; i++) out.insertAdjacentHTML('beforeend', "
              "'<p>Row ' + i + ' ' + 'x'.repeat(200) + '</p>'); };</script>",
+    "/list": "<!doctype html><title>List</title><h1>Results</h1>" + "".join(
+        '<div class="res card" data-sku="S%d"><h2>Product %d</h2><a href="/p/%d">open</a>%s'
+        '<span class="tag">new</span><span class="tag">sale</span></div>'
+        % (i, i, i, '<b class=price>$%d.00</b>' % (i * 3) if i % 3 else '') for i in range(1, 7)),
     "/late": "<!doctype html><title>Late</title><h1>Late</h1><script>setTimeout(() => "
              "document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>'), 800)</script>" + BEACON,
 }
