@@ -38,10 +38,34 @@ class Shell extends HTMLElement {
 }
 customElements.define('app-shell', Shell);
 </script></body></html>"""
+# Settle fixtures. /beacon: a third-party (localhost vs 127.0.0.1) fetch and a first-party
+# image every 200 ms forever, like analytics and lazy images on retail sites. /chain: four
+# first-party fetches of 250 ms, 150 ms apart (400 ms start to start), then "Chain done".
+# /late: "Late text" appears after 800 ms while the beacons keep firing.
+BEACON = """<script>let n = 0; setInterval(() => { n++;
+  fetch('http://localhost:' + location.port + '/b?' + n, {mode: 'no-cors'}).catch(() => {});
+  new Image().src = '/px?' + n; }, 200);</script>"""
+EXTRA = {
+    "/beacon": "<!doctype html><title>Beacon</title><h1>Beacon page</h1>" + BEACON,
+    "/chain": """<!doctype html><title>Chain</title><h1>Chain</h1><p id=s>step 0</p><script>
+(async () => { for (let i = 1; i <= 4; i++) { await fetch('/api/slow?' + i);
+  document.getElementById('s').textContent = 'step ' + i;
+  if (i < 4) await new Promise(r => setTimeout(r, 150)); }
+  document.body.insertAdjacentHTML('beforeend', '<p>Chain done</p>'); })();</script>""",
+    "/late": "<!doctype html><title>Late</title><h1>Late</h1><script>setTimeout(() => "
+             "document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>'), 800)</script>" + BEACON,
+}
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a): pass
     def do_GET(self):
-        if self.path.startswith('/api/items'):
+        path = self.path.split('?')[0]
+        if path in ('/b', '/px'):
+            self.send_response(204); self.send_header('Content-Length', '0'); self.end_headers(); return
+        if path == '/api/slow':
+            time.sleep(0.25); body, ct = b'{}', 'application/json'
+        elif path in EXTRA:
+            body, ct = EXTRA[path].encode(), 'text/html'
+        elif self.path.startswith('/api/items'):
             time.sleep(1.2)
             body = json.dumps({"items":[{"name":f"Item {c}","price":f"${10*i+5}.00","weight":f"{500*i}"} for i,c in enumerate("ABCDEFG",1)]}).encode()
             ct='application/json'

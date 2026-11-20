@@ -20,16 +20,25 @@ component portals (Salesforce, many Angular/Lit enterprise apps) use `text` and 
 
 ```
 C click --text Continue -t T                      # click, then settle (network + DOM quiet)
-C click --text Continue -t T --for-text "Step 2"  # ...and require this text
-C nav URL -t T --for-selector "table.results"     # load event, then condition, then settle
-C wait -t T --for-gone "Loading"                  # spinner gone, then settle
-C wait -t T --for-url "/summary" --no-settle      # condition only
+C click --text Continue -t T --for-text "Step 2"  # ...return once this text shows (no settle)
+C nav URL -t T --for-selector "table.results"     # load event, then condition
+C wait -t T --for-gone "Loading" --settle         # spinner gone, then settle too
+C nav URL -t T --strict-settle                    # old rules: every request counts, no cap
 ```
 
-Settled = no in-flight XHR/fetch/document request (ignoring ones open > 10 s), no visible
-spinner/`aria-busy`/"Loading...", and URL + visible text length unchanged for `--quiet`
-seconds (0.5). Timeouts (`--timeout`, 15 s) return `"timeout": ...` with exit 0 for
-`click`/`nav` and exit 1 for `wait`, so check the field. Polling in-page is still possible:
+Settled = for `--quiet` seconds (0.3; 0.5 after a `click`/`key` until anything changes):
+
+- no busy request: a same-site XHR/fetch/document/script, the tab's own document, or a
+  third-party XHR/fetch under 1.5 s old (requests open > 10 s are ignored)
+- no visible spinner/`aria-busy`/"Loading..."
+- URL, visible text length and completed same-site XHR/fetch count unchanged
+
+Same-site = same registrable domain (`api.shop.com` ~ `www.shop.com`). Settling stops after
+`--settle-max` (5 s): ok, plus `"settle": "capped"` and `"busy": ["host:count", ...]`.
+A `--for-*` condition replaces settling (one 0.1 s confirmation poll) unless `--settle`.
+Timeouts (`--timeout`, 15 s, for load and condition) return `"timeout": ...` with exit 0 for
+`click`/`nav` and exit 1 for `wait`, so check the field. Capped and timed-out waits also
+print a `warning:` line on stderr. Polling in-page is still possible:
 
 ```
 C eval "await new Promise((ok, no) => { const t0 = Date.now(); (function f(){ const e = __dt.qsa('#result')[0]; if (e) ok(e.innerText); else if (Date.now() - t0 > 10000) no(new Error('timeout')); else setTimeout(f, 100); })(); })" -t T

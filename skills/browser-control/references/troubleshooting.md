@@ -42,7 +42,8 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 | Screenshot blank/hangs on a background tab | `send Target.activateTarget -p targetId=ID` first. |
 | `CDP error -32000 ... Not allowed` | Some methods are blocked on `chrome://`/`edge://` pages and extension pages. |
 | PowerShell breaks JSON args | Use `-p key=value` or `@params.json`. |
-| `click`/`wait` returns `"timeout": "page still busy"` | The page polls or animates constantly. Use `--for-text`/`--for-selector` with `--no-settle`, or lower `--timeout`. |
+| `"settle": "capped"` or `"timeout": "page still busy"` | `busy` names the hosts still loading (or `page:changing`). Use `--for-text`/`--for-selector` for the state you need, or lower `--settle-max`. |
+| Action returned before the page finished (data from another domain) | Add `--for-text`/`--for-selector`, or `--strict-settle` for the old every-request rule. |
 | `text` is empty or misses content | Cross-origin iframe: `targets --all`, then `text -t <iframe id>`. Hidden content needs `--hidden`. |
 | `a broker is already running for ...` | `--port`/`--browser` differ from the running broker's. `stop` first. |
 

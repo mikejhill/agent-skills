@@ -55,12 +55,23 @@ IDLE_ENV = "BROWSER_CONTROL_IDLE"
 CONNECT_WAIT = 120  # seconds to wait for the user to approve the browser prompt
 EVENT_BUFFER = 20000  # Network.enable on a busy SPA emits thousands of events per page
 INFLIGHT_MAX_AGE = 10.0  # ignore requests open longer than this (long-poll, streaming)
-INFLIGHT_SKIP = {"WebSocket", "EventSource", "Ping", "Media", "Manifest", "Prefetch"}
+INFLIGHT_SKIP = {"WebSocket", "EventSource", "Ping", "Media", "Manifest", "Prefetch"}  # --strict-settle
+# Settle (default): only these request types can keep a page busy, and only when same-site,
+# a main-frame document, or a third-party XHR/fetch younger than THIRD_PARTY_GRACE seconds.
+# Third-party beacons, ads, trackers and lazy images no longer reset the quiet window.
+SETTLE_TYPES = {"Document", "XHR", "Fetch", "Script"}
+THIRD_PARTY_GRACE = 1.5
+DEFAULT_QUIET = 0.3  # seconds of quiet that count as settled (--strict-settle: 0.5)
+# After a click or key press the page may react on a timer with no network (a menu that opens
+# 400 ms later). Until anything changes, the quiet window is this long instead.
+FIRST_QUIET = 0.5
+DEFAULT_SETTLE_MAX = 5.0  # cap on settling after load / condition; returns ok with "settle":"capped"
+SLD_SUFFIXES = {"co", "com", "net", "org", "gov", "ac", "edu", "ne", "or", "go", "ltd", "plc", "gob", "nic"}
 
 # In-page helper library, (re)defined idempotently before every eval, so it survives
 # navigations and SPA reloads with no separate injection step. Everything pierces open
 # shadow roots and same-origin iframes. Exposed to `eval` code as `__dt`.
-DT_VERSION = 3
+DT_VERSION = 4
 DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG']);
   const CLICKABLE = 'a,button,summary,label,select,option,input[type=button],input[type=submit],' +
@@ -167,13 +178,13 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
   // placeholders on screen), so it stops counting as busy.
   const STUCK = 3000, seenEl = new WeakMap(), seenTx = new Map();
   const fresh = (m, k) => { const n = Date.now(); if (!m.has(k)) m.set(k, n); return n - m.get(k) < STUCK; };
-  const sig = () => {
+  const sig = (strict) => {
     const t = deepText();
     const line = (t.match(/(^|\n)[^\n]{0,30}\b(loading|please wait)\b[^\n]*/i) || [])[0];
     const busy = (line && fresh(seenTx, line + '|' + location.href)) ||
       qsa(BUSY).filter(e => vis(e) && e.getBoundingClientRect().width > 0).map(e => fresh(seenEl, e)).includes(true);
-    return busy ? 'busy:' + Math.random() :
-      location.href + '|' + t.length + '|' + performance.getEntriesByType('resource').length;
+    return busy ? 'busy:' + Math.random() : location.href + '|' + t.length +
+      (strict ? '|' + performance.getEntriesByType('resource').length : '');
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep };
@@ -447,6 +458,26 @@ def cands(ts):
 
 # ------------------------------------------------------------------------- broker
 
+def host_of(url):
+    u = (url or "").split("://", 1)
+    if len(u) < 2:
+        return ""
+    h = u[1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].rsplit("@", 1)[-1]
+    if h.startswith("["):
+        return h.split("]", 1)[0] + "]"
+    return h.split(":", 1)[0].lower()
+
+
+def site_of(host):
+    """Registrable domain: last 2 labels, or 3 under a 2-letter ccTLD with a generic second
+    level (example.co.uk). IP addresses and single labels are their own site."""
+    if not host or host.startswith("[") or host.replace(".", "").isdigit():
+        return host
+    labels = host.split(".")
+    n = 3 if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in SLD_SUFFIXES else 2
+    return ".".join(labels[-n:])
+
+
 class Broker:
     def __init__(self, endpoint, idle, token):
         self.endpoint, self.idle, self.token = endpoint, idle, token
@@ -459,7 +490,8 @@ class Broker:
         self.econd = threading.Condition()
         self.sessions = {}  # targetId -> sessionId
         self.sess_target = {}  # sessionId -> targetId
-        self.inflight = {}  # sessionId -> {requestId: start time}, once Network is enabled
+        self.inflight = {}  # sessionId -> {requestId: (start, type, host, main frame)}, once Network is enabled
+        self.done = {}  # sessionId -> {site: completed XHR/fetch count} (settle signature)
         self.net_on = set()  # sessionIds with Network.enable sent by the broker or a client
         self.attach_lock = threading.Lock()
         self.last_activated = None  # targetId of the last Target.activateTarget sent
@@ -508,14 +540,19 @@ class Broker:
                     if t:
                         self.sessions.pop(t, None)
                     self.inflight.pop(s, None)
+                    self.done.pop(s, None)
                     self.net_on.discard(s)
                 elif sid and m.startswith("Network."):
                     p = msg.get("params", {})
                     fl = self.inflight.setdefault(sid, {})
                     if m == "Network.requestWillBeSent" and p.get("type") not in INFLIGHT_SKIP:
-                        fl[p.get("requestId")] = time.time()
+                        fl[p.get("requestId")] = (time.time(), p.get("type"), host_of(p.get("request", {}).get("url")),
+                                                  p.get("frameId") == self.sess_target.get(sid))
                     elif m in ("Network.loadingFinished", "Network.loadingFailed"):
-                        fl.pop(p.get("requestId"), None)
+                        r = fl.pop(p.get("requestId"), None)
+                        if r and r[1] in ("XHR", "Fetch"):
+                            d = self.done.setdefault(sid, {})
+                            d[site_of(r[2])] = d.get(site_of(r[2]), 0) + 1
                 with self.econd:
                     self.seq += 1
                     self.events.append({"seq": self.seq, "t": round(time.time(), 3), "method": m,
@@ -689,6 +726,7 @@ class Broker:
             if sess and "error" not in r and req["method"] in ("Network.enable", "Network.disable"):
                 (self.net_on.add if req["method"] == "Network.enable" else self.net_on.discard)(sess)
                 self.inflight.pop(sess, None)
+                self.done.pop(sess, None)
             if tid:
                 r["targetId"] = tid
             return r
@@ -727,46 +765,98 @@ class Broker:
             return None, (r.get("error") or res["exceptionDetails"]).get("text") or "evaluate failed"
         return res.get("result", {}).get("value"), None
 
+    def busy_requests(self, sid, site, now, strict):
+        """In-flight requests that keep the page from counting as settled."""
+        out = []
+        for st, typ, host, main in list(self.inflight.get(sid, {}).values()):
+            age = now - st
+            if age >= INFLIGHT_MAX_AGE:
+                continue
+            if not strict:
+                if typ not in SETTLE_TYPES:
+                    continue
+                same = site_of(host) == site or (typ == "Document" and main)
+                if not same and not (typ in ("XHR", "Fetch") and age < THIRD_PARTY_GRACE):
+                    continue
+            out.append(host or "?")
+        return out
+
     def wait(self, req):
         """Poll until `cond` holds, then (if settle) until the page is quiet.
 
-        Quiet = no in-flight XHR/fetch/document requests and no change in URL, visible text
-        length or completed-resource count for `quiet` seconds. Errors from evaluate (page
-        mid-navigation, context destroyed) count as "not ready", not failure.
+        Quiet = for `quiet` seconds: no busy request (same-site document/XHR/fetch/script, a
+        main-frame document, or a third-party XHR/fetch under 1.5 s old), no visible busy
+        indicator, and no change in URL, visible text length or completed same-site XHR/fetch
+        count. Settling stops after `settle_max` seconds with ok + "settle": "capped". With a
+        condition and no `settle`, one 0.1 s confirmation poll replaces settling. `strict`
+        restores the pre-2026-11-20 rules (any request type and origin, resource count, no cap).
+        `action` (click/key): until anything changes, the window is FIRST_QUIET, since UI often
+        reacts on a timer with no network.
+        Errors from evaluate (page mid-navigation, context destroyed) count as "not ready".
         """
         tid, sid = self.session_for(req["target"])
-        settle = req.get("settle", True)
+        settle, strict = req.get("settle", True), bool(req.get("strict"))
         if settle:
             self.ensure_network(sid)
         cond = req.get("cond")
-        quiet, timeout = float(req.get("quiet", 0.5)), float(req.get("timeout", 15))
+        quiet = float(req.get("quiet") or (0.5 if strict else DEFAULT_QUIET))
+        timeout = float(req.get("timeout", 15))
+        settle_max = None if strict else float(req.get("settle_max") or DEFAULT_SETTLE_MAX)
+        first_quiet = max(quiet, FIRST_QUIET) if req.get("action") and not strict else quiet
+        first_sig, changed = None, False
         t0 = time.time()
         end = t0 + timeout
         met_at = None
-        last_sig, last_change = None, t0
-        polls = 0
+        last_sig, last_change, busy = None, t0, []
         while True:
             now = time.time()
-            polls += 1
             if met_at is None:
                 ok, err = (True, None) if not cond else self.evaluate(sid, cond)
                 if ok and not err:
-                    met_at = now
-                    last_change = now
+                    met_at = last_change = now
+                    if cond and not settle:  # confirm once, so a flicker doesn't count
+                        time.sleep(0.1)
+                        ok, err = self.evaluate(sid, cond)
+                        if ok and not err:
+                            break
+                        met_at = None
             if met_at is not None:
                 if not settle:
                     break
-                sig, err = self.evaluate(sid, "__dt.sig()")
-                busy = sum(1 for st in self.inflight.get(sid, {}).values() if now - st < INFLIGHT_MAX_AGE)
+                sig, err = self.evaluate(sid, "__dt.sig(%s)" % ("true" if strict else "false"))
+                if not strict and isinstance(sig, str) and not sig.startswith("busy:"):
+                    site = site_of(host_of(sig.split("|", 1)[0]))
+                    sig += "|%d" % self.done.get(sid, {}).get(site, 0)
+                else:
+                    site = None
+                busy = self.busy_requests(sid, site, now, strict)
+                if first_sig is None and not err:
+                    first_sig = sig
+                changed = changed or bool(busy) or (first_sig is not None and sig != first_sig)
                 if err or busy or sig != last_sig:
                     last_sig, last_change = sig, now
-                elif now - last_change >= quiet:
+                elif now - last_change >= (quiet if changed else first_quiet):
                     break
+                if settle_max is not None and now - met_at >= settle_max:
+                    return dict({"targetId": tid, "ok": True, "settle": "capped",
+                                 "waited": round(now - t0, 2)}, **self.busy_report(busy, sig))
             if now >= end:
-                return {"targetId": tid, "ok": False, "cond_met": met_at is not None,
-                        "waited": round(now - t0, 2), "inflight": len(self.inflight.get(sid, {}))}
+                r = {"targetId": tid, "ok": False, "cond_met": met_at is not None,
+                     "waited": round(now - t0, 2), "inflight": len(self.inflight.get(sid, {}))}
+                if met_at is not None:
+                    r.update(self.busy_report(busy, last_sig))
+                return r
             time.sleep(0.1)
         return {"targetId": tid, "ok": True, "waited": round(time.time() - t0, 2)}
+
+    @staticmethod
+    def busy_report(busy, sig):
+        """Top 3 hosts still busy (host:count), or why the page itself kept changing."""
+        c = collections.Counter(busy)
+        r = ["%s:%d" % hc for hc in c.most_common(3)]
+        if not r:
+            r = ["page:busy-indicator" if isinstance(sig, str) and sig.startswith("busy:") else "page:changing"]
+        return {"busy": r}
 
     def get_events(self, req):
         since = req.get("since", 0)
@@ -1055,9 +1145,10 @@ def js_eval(args, expr, target, timeout=30):
     return r.get("result", {}).get("value")
 
 
-def broker_wait(args, target, cond=None, settle=True, quiet=0.5, timeout=15):
-    r = rpc({"op": "wait", "target": target, "cond": cond, "settle": settle, "quiet": quiet,
-             "timeout": timeout}, broker(args), timeout=timeout + 15)
+def broker_wait(args, target, cond=None, settle=True, quiet=None, timeout=15, action=False):
+    r = rpc({"op": "wait", "target": target, "cond": cond, "settle": settle, "quiet": quiet, "action": action,
+             "timeout": timeout, "settle_max": getattr(args, "settle_max", None),
+             "strict": getattr(args, "strict_settle", False)}, broker(args), timeout=timeout + 15)
     if "error" in r:
         raise CLIError(r["error"].get("message"))
     return r
@@ -1214,7 +1305,7 @@ def wait_event(st, method, target, since, timeout):
 def cmd_nav(args):
     st = broker(args)
     check(send(args, "Page.enable", {}, args.target))
-    if not args.no_wait and not args.no_settle:
+    if not args.no_wait and want_settle(args, wait_opts(args)):
         rpc({"op": "netwatch", "target": args.target}, st)
     seq = rpc({"op": "events", "since": 10 ** 12}, st)["last_seq"]
     r = check(send(args, "Page.navigate", {"url": args.url}, args.target))
@@ -1266,15 +1357,37 @@ def wait_opts(args):
     return "__dt.has(%s)" % json.dumps(o) if o else None
 
 
+def want_settle(args, cond):
+    """Settle after an action/wait? A --for-* condition replaces settling unless --settle."""
+    if getattr(args, "no_settle", False):
+        return False
+    if getattr(args, "settle", False):
+        return True
+    return not cond and getattr(args, "settle_default", True)
+
+
+def apply_wait(res, w, cond):
+    """Copy a broker wait result into command output; warn on stderr when it fell short."""
+    res["waited"] = w["waited"]
+    if not w["ok"]:
+        res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    elif w.get("settle"):
+        res["settle"] = w["settle"]
+    if w.get("busy"):
+        res["busy"] = w["busy"]
+    if not w["ok"] or w.get("settle"):
+        sys.stderr.write("warning: %s after %.1fs (busy: %s)\n" % (
+            res.get("timeout") or "settle capped", w["waited"], ", ".join(w.get("busy") or []) or "-"))
+
+
 def after_action(args, res):
     """Shared tail for click/key/nav: wait for a condition and/or quiet, then optional text."""
     cond = wait_opts(args)
-    if cond or not args.no_settle:
-        w = broker_wait(args, args.target, cond, settle=not args.no_settle, quiet=args.quiet,
-                        timeout=args.timeout)
-        res["waited"] = w["waited"]
-        if not w["ok"]:
-            res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    settle = want_settle(args, cond)
+    if cond or settle:
+        w = broker_wait(args, args.target, cond, settle=settle, quiet=args.quiet, timeout=args.timeout,
+                        action=args.fn in (cmd_click, cmd_key))
+        apply_wait(res, w, cond)
     if getattr(args, "show", None) is not None:
         o = {"max": args.max}
         if args.show:
@@ -1289,7 +1402,7 @@ def cmd_click(args):
     o = {"selector": args.selector, "text": args.text, "index": args.index, "exact": args.exact,
          "within": args.within, "hidden": args.hidden}
     o = {k: v for k, v in o.items() if v not in (None, False)}
-    if not args.no_settle:  # start network tracking before the click, not after it
+    if want_settle(args, wait_opts(args)):  # start network tracking before the click, not after it
         rpc({"op": "netwatch", "target": args.target}, broker(args))
     p = js_eval(args, "__dt.pick(%s)" % json.dumps(o), args.target)
     if not p.get("found"):
@@ -1323,10 +1436,10 @@ def cmd_wait(args):
     cond = wait_opts(args)
     if args.ms:
         time.sleep(args.ms / 1000.0)
-    w = broker_wait(args, args.target, cond, settle=not args.no_settle, quiet=args.quiet, timeout=args.timeout)
-    res = {"ok": w["ok"], "waited": w["waited"]}
-    if not w["ok"]:
-        res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    w = broker_wait(args, args.target, cond, settle=want_settle(args, cond), quiet=args.quiet,
+                    timeout=args.timeout)
+    res = {"ok": w["ok"]}
+    apply_wait(res, w, cond)
     if args.show is not None:
         o = {"max": args.max}
         if args.show:
@@ -1451,7 +1564,6 @@ def cmd_key(args):
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyDown" if text else "rawKeyDown",
                                                        **({"text": text} if text else {})), args.target))
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyUp"), args.target))
-    args.no_settle = not args.settle
     out(after_action(args, {"pressed": args.keys}), args)
 
 
@@ -1530,12 +1642,18 @@ def add_wait_flags(p, settle_default=True):
     g.add_argument("--for-selector", metavar="CSS", help="wait until a visible element matches CSS")
     g.add_argument("--for-gone", metavar="TEXT", help="wait until TEXT is no longer visible (spinners)")
     g.add_argument("--for-url", metavar="SUBSTR", help="wait until location.href contains SUBSTR")
+    p.set_defaults(settle_default=settle_default)
     if settle_default:
         g.add_argument("--no-settle", action="store_true", help="skip waiting for network/DOM quiet")
-    else:
-        g.add_argument("--settle", action="store_true", help="wait for network/DOM quiet afterwards")
-    g.add_argument("--quiet", type=float, default=0.5, help="quiet period in seconds (default 0.5)")
-    g.add_argument("--timeout", type=float, default=15, help="max seconds to wait (default 15)")
+    g.add_argument("--settle", action="store_true",
+                   help="settle even with a --for-* condition (by default the condition replaces settling)")
+    g.add_argument("--quiet", type=float, help="quiet period in seconds (default %s; strict 0.5)" % DEFAULT_QUIET)
+    g.add_argument("--settle-max", type=float, metavar="SEC",
+                   help="stop settling after SEC, return ok with \"settle\":\"capped\" (default %s)"
+                        % DEFAULT_SETTLE_MAX)
+    g.add_argument("--strict-settle", action="store_true",
+                   help="old rules: any request type/origin and resource loads count; no cap")
+    g.add_argument("--timeout", type=float, default=15, help="max seconds for load and condition (default 15)")
     g.add_argument("--show", nargs="?", const="", metavar="AFTER",
                    help="print visible text afterwards (optionally only after marker AFTER)")
     g.add_argument("--max", type=int, default=4000, help="max chars for --show (default 4000)")

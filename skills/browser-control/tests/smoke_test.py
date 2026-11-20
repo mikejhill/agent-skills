@@ -174,6 +174,27 @@ def main():
         code, o, e = r.cli("wait", "-t", tid, "--timeout", "8")
         w = json.loads(o) if code == 0 else {}
         r.check("a placeholder that never goes away stops blocking settle", w.get("ok") and w["waited"] < 5, o + e)
+        # settling: third-party noise doesn't block, first-party chains do, --for-* returns fast
+        code, o, e = r.cli("nav", base + "beacon", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("nav settles despite endless third-party beacons and lazy images",
+                res.get("waited", 99) < 1.5 and "busy" not in res and "timeout" not in res, o + e)
+        code, o, e = r.cli("nav", base + "beacon", "-t", tid, "--strict-settle", "--timeout", "3")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--strict-settle keeps the old rules (never quiet here)",
+                res.get("timeout") == "page still busy" and res.get("busy") and "warning:" in e, o + e)
+        code, o, e = r.cli("nav", base + "chain", "-t", tid, "--show")
+        r.check("settle waits for a first-party fetch chain", code == 0 and "Chain done" in o, o + e)
+        code, o, e = r.cli("nav", base + "chain", "-t", tid, "--settle-max", "0.3", "--show")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--settle-max caps settling with ok + busy report", res.get("settle") == "capped"
+                and res.get("busy") and "Chain done" not in res.get("text", "") and "warning:" in e, o + e)
+        code, o, e = r.cli("nav", base + "late", "-t", tid, "--no-wait")
+        t0 = time.time()
+        code, o, e = r.cli("wait", "-t", tid, "--for-text", "Late text")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
+                0.6 < res.get("waited", 0) < 1.1 and "settle" not in res, o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
         r.cli("stop")

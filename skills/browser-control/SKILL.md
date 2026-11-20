@@ -84,9 +84,14 @@ browser.py text -t 3F2A --max 3000
 Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 
 - **Never `sleep`.** `click`, `nav` and `wait` block until the page settles: no in-flight
-  XHR/fetch, no visible spinner or "Loading..." (one stuck on screen for 3 s is ignored), and URL + visible text unchanged for
-  `--quiet` (0.5 s). Add `--for-text`, `--for-selector`, `--for-gone` or `--for-url` to wait
-  for a specific state. They return `"timeout"` instead of failing if the page never settles.
+  same-site XHR/fetch/document/script, no visible spinner or "Loading..." (one stuck on screen
+  for 3 s is ignored), and URL + visible text unchanged for `--quiet` (0.3 s). Third-party
+  beacons, ads and images don't count. Settling stops after `--settle-max` (5 s) with
+  `"settle": "capped"`.
+- **Wait for the state you need.** `--for-text`, `--for-selector`, `--for-gone` or
+  `--for-url` return as soon as it holds (no settle unless `--settle`): the fastest wait.
+- **Read action output; never discard it** (`>/dev/null`, `| Out-Null`). `"timeout"`,
+  `"settle": "capped"` and `"busy": ["host:count"]` say the page may not be ready.
 - **Read with `text`, not `innerText`.** `text` pierces shadow DOM and same-origin iframes
   (where `document.body.innerText` returns nothing on Angular/Lit/Salesforce portals), shows
   form state (`[x]`, `[value]`), and trims with `--after MARKER`, `--grep REGEX -C N`,
@@ -141,7 +146,8 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `batch FILE\|- [-t T]` | Low-level: JSON lines `{"method","params","target"}` in one call |
 
 `WAIT` = `--for-text T`, `--for-selector CSS`, `--for-gone T`, `--for-url S`, `--no-settle`,
-`--quiet SEC`, `--timeout SEC` (15), `--show [MARKER]` (print visible text after waiting).
+`--settle`, `--quiet SEC` (0.3), `--settle-max SEC` (5), `--strict-settle`, `--timeout SEC`
+(15, load and condition), `--show [MARKER]` (print visible text after waiting).
 
 **Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
 commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).

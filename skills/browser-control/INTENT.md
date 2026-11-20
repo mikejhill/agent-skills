@@ -51,3 +51,11 @@ the purpose.
   broker. SKILL.md no longer tells agents to `stop` after each task (only when the user is done,
   wants the banner gone, or to switch browsers) and says to start the broker first, in the
   background where possible, so the prompt overlaps planning.
+- 2026-11-20: [agent] Smarter settling, from the same study: ad-heavy retail navs took
+  10-26 s because third-party beacons and lazy images kept resetting the quiet window. Only
+  same-site document/XHR/fetch/script requests (plus the tab's own document and third-party
+  XHR/fetch under 1.5 s old) count as busy; the signature uses completed same-site XHR/fetch
+  instead of every resource. `--quiet` 0.5 -> 0.3 s, but 0.5 s after a click/key until
+  anything changes (timer-driven UI). New `--settle-max` (5 s, returns `"settle": "capped"`
+  with `busy` hosts and a stderr warning), `--for-*` replaces settling unless `--settle`,
+  `--strict-settle` keeps the old rules. Simple nav 0.66 -> 0.46 s on the fixture.
