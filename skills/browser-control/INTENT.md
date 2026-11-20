@@ -45,3 +45,9 @@ the purpose.
   indicators now count only while new (3 s), and GitHub navs settle in about 3.6 s. `-t active`
   failed with two Edge windows open (neither focused while the user is in another app); it
   now falls back to the tab last brought forward with `activate`.
+- 2026-11-20: [agent] Broker lifetime from a timing study of 6 real sessions: 4 broker starts
+  waited 32-127 s (405 s total) on the approval prompt, the largest single cost. Idle default
+  900 s -> 3600 s, overridable with `BROWSER_CONTROL_IDLE`; `start --idle` also updates a running
+  broker. SKILL.md no longer tells agents to `stop` after each task (only when the user is done,
+  wants the banner gone, or to switch browsers) and says to start the broker first, in the
+  background where possible, so the prompt overlaps planning.

@@ -36,7 +36,7 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 | `start` hangs, then "timed out waiting for the browser" | Prompt not approved (maybe behind other windows). Ask the user to look at the browser, then retry. |
 | "connection closed during handshake" | User clicked Deny, or the browser closed. |
 | `broker exited` / `disconnected` | Browser closed or debugging toggled off. Next command restarts the broker (new prompt). |
-| Second approval prompt mid-task | Broker restarted (idle timeout or browser restart). Raise `start --idle`. |
+| Second approval prompt mid-task | Broker restarted (`stop`, idle timeout, or browser restart). Don't `stop` between tasks; raise the timeout with `start --idle SEC` or `BROWSER_CONTROL_IDLE`. |
 | Events missing | Domain not enabled on that tab, broker restarted, or `--since` wrong (use `mark`). |
 | `no target matches` / ambiguous | Use `targets` and pass an id prefix. Tabs that navigated keep their id. |
 | Screenshot blank/hangs on a background tab | `send Target.activateTarget -p targetId=ID` first. |
@@ -54,8 +54,9 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
   state file (other local users can't drive the browser).
 - Windows: spawned with `pythonw.exe` + `CREATE_NO_WINDOW | DETACHED_PROCESS`, so no console
   window appears and closing the caller's terminal doesn't kill it.
-- Exits on: `stop`, idle timeout (default 900 s since the last CLI request), browser
-  disconnect, or failed connect. It removes its state file on exit.
+- Exits on: `stop`, idle timeout (default 3600 s since the last CLI request; set with
+  `start --idle SEC`, which also updates a running broker, or `BROWSER_CONTROL_IDLE`),
+  browser disconnect, or failed connect. It removes its state file on exit.
 - One broker per user. To switch browsers: `stop`, then `--browser other start`.
 - `BROWSER_CONTROL_HOME=DIR` moves the state directory (isolated brokers for tests;
   `tests/smoke_test.py` uses it so it never touches the user's broker).
