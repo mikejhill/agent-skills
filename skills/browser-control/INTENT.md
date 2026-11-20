@@ -80,3 +80,9 @@ the purpose.
   `--expect-text`/`--expect-selector`/`--expect-url` on click/nav/key/wait fail the step
   (exit 1) when unmet, so a wrong click stops a batch. SKILL.md: one call per page
   transition, batch only predictable steps, never past a submit the user must confirm.
+- 2026-11-20: [agent] Hidden tabs, found testing on local Edge: a tab in a covered,
+  minimized or background window is "hidden", so timers throttle to 1/s or slower (settle
+  declared quiet mid-chain; waits overran) and mouse clicks took ~5 s or were dropped. The
+  broker now turns on focus emulation for each tab it attaches to, so driven tabs act
+  visible and focused; `active`/`--focus` probes switch it off briefly to read the real
+  state. Smoke test: UTF-8 subprocess output and full process-tree teardown on Windows.

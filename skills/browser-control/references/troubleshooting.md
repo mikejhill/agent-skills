@@ -58,6 +58,8 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 - Exits on: `stop`, idle timeout (default 3600 s since the last CLI request; set with
   `start --idle SEC`, which also updates a running broker, or `BROWSER_CONTROL_IDLE`),
   browser disconnect, or failed connect. It removes its state file on exit.
+- Tabs it attaches to get focus emulation (`Emulation.setFocusEmulationEnabled`), so a tab
+  in a covered or background window still runs timers and takes input at full speed.
 - One broker per user. To switch browsers: `stop`, then `--browser other start`.
 - `BROWSER_CONTROL_HOME=DIR` moves the state directory (isolated brokers for tests;
   `tests/smoke_test.py` uses it so it never touches the user's broker).

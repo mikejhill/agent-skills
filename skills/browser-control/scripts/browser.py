@@ -734,8 +734,13 @@ class Broker:
                     return
                 sid = r["result"]["sessionId"]
                 fresh[tid] = sid
+            ours = tid not in fresh
+            if ours:  # see the real state, not our focus emulation
+                self.emulate_focus(sid, False)
             r = self.call("Runtime.evaluate", {"expression": "[document.visibilityState, document.hasFocus()]",
                                                "returnByValue": True}, sid, timeout=2)
+            if ours:
+                self.emulate_focus(sid, True)
             v = r.get("result", {}).get("result", {}).get("value")
             if isinstance(v, list) and len(v) == 2:
                 res[tid] = {"visible": v[0] == "visible", "focused": bool(v[1])}
@@ -750,6 +755,7 @@ class Broker:
         for tid, sid in list(fresh.items()):
             if tid == kept and tid not in self.sessions:
                 self.sessions[tid], self.sess_target[sid] = sid, tid
+                self.emulate_focus(sid, True)
             else:  # leave tabs we only peeked at as they were
                 self.call("Target.detachFromTarget", {"sessionId": sid}, timeout=0)
         return res
@@ -820,7 +826,15 @@ class Broker:
             raise ValueError("attach failed: %s" % r["error"].get("message"))
         sid = r["result"]["sessionId"]
         self.sessions[tid], self.sess_target[sid] = sid, tid
+        self.emulate_focus(sid, True)
         return tid, sid
+
+    def emulate_focus(self, sid, on):
+        """Make the tab act as visible and focused while we drive it. A tab in a covered,
+        minimized or background window is "hidden": timers throttle to 1/s or slower (settle
+        quits mid-chain, waits overrun) and mouse input takes seconds or is dropped. Also run
+        when `probe_focus` reuses a session, so the probe sees the real state."""
+        self.call("Emulation.setFocusEmulationEnabled", {"enabled": on}, sid, timeout=3)
 
     # --- CLI side
     def handle(self, req):

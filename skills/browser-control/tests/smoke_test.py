@@ -57,7 +57,7 @@ class Runner:
 
     def cli(self, *a, stdin=None):
         p = subprocess.run([sys.executable, CLI, "--port", str(self.port)] + list(a), input=stdin,
-                           capture_output=True, text=True, env=self.env, timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", env=self.env, timeout=60)
         return p.returncode, p.stdout, p.stderr
 
     def check(self, name, cond, detail=""):
@@ -190,6 +190,16 @@ def main():
         code, o, e = r.cli("wait", "-t", tid, "--timeout", "8")
         w = json.loads(o) if code == 0 else {}
         r.check("a placeholder that never goes away stops blocking settle", w.get("ok") and w["waited"] < 5, o + e)
+        # a tab in a background/covered window is "hidden" and throttles timers; driving it
+        # must not be slowed by that
+        code, o, e = r.cli("send", "Target.createTarget", "-p", "url=about:blank", "-p", "background=true")
+        bg = json.loads(o)["targetId"]
+        code, o, e = r.cli("eval", "[document.visibilityState, await new Promise(ok => { let n = 0; const t0 = Date.now(); "
+                           "const i = setInterval(() => { if (++n === 5) { clearInterval(i); ok(Date.now() - t0); } }, 150); })]",
+                           "-t", bg)
+        v = json.loads(o) if code == 0 else [None, 99999]
+        r.check("background tab acts visible, timers unthrottled", v[0] == "visible" and v[1] < 1500, o + e)
+        r.cli("close", "-t", bg)
         # settling: third-party noise doesn't block, first-party chains do, --for-* returns fast
         code, o, e = r.cli("nav", base + "beacon", "-t", tid)
         res = json.loads(o) if code == 0 else {}
@@ -261,7 +271,10 @@ def main():
     finally:
         r.cli("stop")
         for p in procs:
-            p.terminate()
+            if os.name == "nt":  # terminate() leaves the browser's child processes running
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+            else:
+                p.terminate()
         for p in procs:
             try:
                 p.wait(10)
