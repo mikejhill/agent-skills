@@ -1,47 +1,47 @@
 ---
 name: Codex review gate
-description: Claude Code only. Run a Codex review of your code changes before you finish a task, through the cross-harness skill.
+description: Claude Code only. Run a Codex review automatically on every change before finishing, through the cross-harness skill.
 applyTo: "**"
 ---
 
 # Codex review gate
 
-Before you report a task as done, have Codex review the code you changed. This replaces
-the openai-codex plugin's stop-time review gate.
+Get a Codex review automatically before you finish any turn that changed files in a
+Git repository. The user doesn't need to ask. This rule is that request, so the
+`cross-harness` skill's "explicit request only" condition is met. Load that skill
+for its workflow. The script is normally `~/.claude/skills/cross-harness/scripts/xh.py`.
 
-## When
+## When to run it
 
-- Run the gate once per task, after your last code edit and before your final reply.
-  Don't run it after every intermediate step.
-- Skip it when the task changed no code: questions, research, plans, status checks,
-  reviews, or edits to prose and docs only.
-- Skip it when `CROSS_HARNESS_DEPTH` is set in the environment. That means Codex
-  started this session, and a review would loop back.
-- Skip it when the user says to skip it for this task or session.
-- If `xh.py check -t codex` shows Codex missing or signed out, skip the gate and say so
-  once in your reply.
+- Run it after the change is finished and your own checks pass. Run it before you
+  report completion, commit, push, or merge.
+- Skip it when the turn changed no tracked or new files in a repository. A chat
+  answer, a read-only investigation, or edits outside any repository don't qualify.
+- Skip it when the user says to skip it for the task. Skip it in a session that
+  another agent started through cross-harness (`claude -p` from Codex).
 
-## How
+## How to run it
 
-Use the `cross-harness` skill (load it for the workflow). The script is normally
-`~/.claude/skills/cross-harness/scripts/xh.py`.
+1. Start the review on the scope of your change:
+   - uncommitted work: `xh.py review -t codex --uncommitted --cwd <repo>`
+   - committed work on a branch: `xh.py review -t codex --base <default-branch> --cwd <repo>`
+2. Poll with `xh.py wait <job> --timeout 90`, repeating while the exit code is 3.
+   Keep each call under the shell tool's time limit.
+3. Check each finding against the code: confirmed, refuted with the reason, or
+   unclear. Fix the confirmed ones, and rerun your own checks.
+4. If you changed code in step 3, run one more review on the new state. Stop after
+   two review rounds in a turn. Report anything still open instead of looping.
 
-1. Pick the scope of this task's changes: `--uncommitted` while they are uncommitted, or
-   `--base <branch's base>` once they are committed on a feature branch.
-2. Run `xh.py review -t codex --adversarial <scope>`. Then run
-   `xh.py wait <job> --timeout 90`, repeating while the exit code is 3.
-3. Check each finding against the code. Fix the confirmed ones that would block shipping
-   (correctness, security, data loss, or broken behavior). Leave refuted and minor ones
-   unfixed, and list them.
-4. If you fixed anything, run the gate once more on the new state. Stop after two review
-   rounds, and report anything still open instead of looping.
-5. In your final reply, add a short "Codex review" section: what it found, what you
-   fixed, and what you rejected and why.
+## What to report
 
-If a review fails or times out, say so in your reply and finish anyway. Never let the
-gate block the task indefinitely.
+In your final message, show Codex's findings in a short list, each with your
+verdict, and say what you fixed. If the review failed or timed out, say so and give
+the job ID. Never present Codex's output as the verdict.
 
-## Related
+If Codex is unavailable (`xh.py check -t codex` fails), say so once and finish
+without the review.
 
-The `/codex-review`, `/codex-adversarial-review`, `/codex-rescue`, `/codex-status`,
-`/codex-result`, and `/codex-cancel` commands run the same tools on demand.
+## Manual commands
+
+`/codex-review`, `/codex-adversarial-review`, `/codex-rescue`, `/codex-status`,
+`/codex-result`, and `/codex-cancel` run the same script on demand.
