@@ -57,7 +57,7 @@ class Runner:
 
     def cli(self, *a, stdin=None):
         p = subprocess.run([sys.executable, CLI, "--port", str(self.port)] + list(a), input=stdin,
-                           capture_output=True, text=True, env=self.env, timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", env=self.env, timeout=60)
         return p.returncode, p.stdout, p.stderr
 
     def check(self, name, cond, detail=""):
@@ -76,7 +76,10 @@ def main():
     procs = [subprocess.Popen([sys.executable, os.path.join(HERE, "fixture_server.py"), str(web)]),
              subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=%d" % cdp,
                                "--user-data-dir=" + os.path.join(tmp, "profile"), "--no-first-run",
-                               "--no-default-browser-check"]
+                               "--no-default-browser-check",
+                               # Edge signs a fresh profile in with the Windows account and syncs the
+                               # user's extensions (first-run windows, their data in a temp dir)
+                               "--disable-sync", "--disable-extensions", "--disable-features=msImplicitSignin"]
                              + (["--no-sandbox"] if getattr(os, "geteuid", lambda: 1)() == 0 else [])  # root (CI containers)
                              + ["about:blank"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
@@ -111,6 +114,9 @@ def main():
         code, o, e = r.cli("click", "--text", "Browse", "-t", tid, "--show", "Choose a Product")
         res = json.loads(o) if code == 0 else {}
         r.check("click --text settles past timer+fetch", "Item G" in res.get("text", ""), o + e)
+        r.check("click returns a change summary with the new lines",
+                "Item A" in res.get("changes", {}).get("added", []) and "Return to Home" in res["changes"].get("new_controls", [])
+                and res["changes"].get("url", "").endswith("#items"), o + e)
         code, o, e = r.cli("net", "-t", tid, "--grep", "/api/items")
         r.check("net lists the XHR", "/api/items" in o and " 200 Fetch " in o, o + e)
         rid = o.split()[0]
@@ -125,9 +131,20 @@ def main():
             "click --text Yes --within 'Discard your changes' --for-text Welcome",
             "eval location.hash",
         ])
-        code, o, e = r.cli("run", "-", "-t", tid, stdin=steps)
+        code, o, e = r.cli("run", "-", "-t", tid, "--echo", "all", stdin=steps)
         r.check("run: hidden detail appears after settle", "Weight 1000 g" in o, o + e)
         r.check("run: dialog round trip", code == 0 and '"#home"' in o, o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text Browse --for-text 'Item G'\n"
+                           "click --text 'Show more' --index 1\ntext --grep Weight")
+        r.check("run --echo last: short output, last step in full", code == 0 and len(o) < 500
+                and "## 1 ok " in o and "Weight 1000 g" in o, o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text 'Add to cart' --expect-text 'Cart (1)'\n"
+                           "eval 1")
+        r.check("run: failed --expect-text stops the run", code == 1 and "expectation not met" in e
+                and "## 2" not in o and '"expect_failed"' in o, o + e)
+        code, o, e = r.cli("wait", "-t", tid, "--no-settle", "--expect-url", "#items", "--expect-selector", "x-card")
+        r.check("--expect-* passes when met", code == 0 and "expect_failed" not in o, o + e)
+        r.cli("nav", "http://127.0.0.1:%d/#home" % web, "-t", tid, "--for-text", "Welcome")
         code, o, e = r.cli("run", "-", "-t", tid, stdin="click --text Nope --no-settle\neval 1")
         r.check("run stops on first error with candidates", code == 2 and "Clickable labels: " in e
                 and "## 2" not in o, o + e)
@@ -176,9 +193,92 @@ def main():
         code, o, e = r.cli("wait", "-t", tid, "--timeout", "8")
         w = json.loads(o) if code == 0 else {}
         r.check("a placeholder that never goes away stops blocking settle", w.get("ok") and w["waited"] < 5, o + e)
+        # a tab in a background/covered window is "hidden" and throttles timers; driving it
+        # must not be slowed by that
+        code, o, e = r.cli("send", "Target.createTarget", "-p", "url=about:blank", "-p", "background=true")
+        bg = json.loads(o)["targetId"]
+        code, o, e = r.cli("eval", "[document.visibilityState, await new Promise(ok => { let n = 0; const t0 = Date.now(); "
+                           "const i = setInterval(() => { if (++n === 5) { clearInterval(i); ok(Date.now() - t0); } }, 150); })]",
+                           "-t", bg)
+        v = json.loads(o) if code == 0 else [None, 99999]
+        r.check("background tab acts visible, timers unthrottled", v[0] == "visible" and v[1] < 1500, o + e)
+        r.cli("close", "-t", bg)
+        # settling: third-party noise doesn't block, first-party chains do, --for-* returns fast
+        code, o, e = r.cli("nav", base + "beacon", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("nav settles despite endless third-party beacons and lazy images",
+                res.get("waited", 99) < 1.5 and "busy" not in res and "timeout" not in res, o + e)
+        code, o, e = r.cli("nav", base + "beacon", "-t", tid, "--strict-settle", "--timeout", "3")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--strict-settle keeps the old rules (never quiet here)",
+                res.get("timeout") == "page still busy" and res.get("busy") and "warning:" in e, o + e)
+        code, o, e = r.cli("nav", base + "chain", "-t", tid, "--show")
+        r.check("settle waits for a first-party fetch chain", code == 0 and "Chain done" in o, o + e)
+        code, o, e = r.cli("nav", base + "chain", "-t", tid, "--settle-max", "0.3", "--show")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--settle-max caps settling with ok + busy report", res.get("settle") == "capped"
+                and res.get("busy") and "Chain done" not in res.get("text", "") and "warning:" in e, o + e)
+        code, o, e = r.cli("nav", base + "late", "-t", tid, "--no-wait")
+        t0 = time.time()
+        code, o, e = r.cli("wait", "-t", tid, "--for-text", "Late text")
+        res = json.loads(o) if code == 0 else {}
+        r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
+                0.6 < res.get("waited", 0) < 1.1 and "settle" not in res, o + e)
+        # change summary and text --changed
+        code, o, e = r.cli("nav", base + "long", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("nav summary is url/title/head", res.get("changes", {}).get("title") == "Long"
+                and res["changes"].get("head") == ["More"], o + e)
+        code, o, e = r.cli("text", "-t", tid, "--max", "50")
+        code, o, e = r.cli("click", "#more", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        ch = res.get("changes", {})
+        r.check("long summary stays under 1200 chars with a pointer to the rest",
+                len(json.dumps(ch)) <= 1200 and "Row 0" in ch.get("added", [""])[0]
+                and "more lines: text --after" in ch.get("more", ""), o + e)
+        code, o, e = r.cli("text", "-t", tid, "--changed", "--max", "100000")
+        r.check("text --changed lists only lines added since the last read",
+                code == 0 and o.count("Row ") == 60 and "More" not in o, o + e)
+        code, o, e = r.cli("text", "-t", tid, "--changed")
+        r.check("text --changed with no change", "[no change since the last text read]" in o, o + e)
+        code, o, e = r.cli("click", "#out p", "-t", tid)
+        res = json.loads(o) if code == 0 else {}
+        r.check("no-op click returns changed: false", res.get("changes") == {"changed": False}, o + e)
+        code, o, e = r.cli("click", "#out p", "-t", tid, "--summary", "none")
+        r.check("--summary none omits the summary", code == 0 and "changes" not in json.loads(o), o + e)
+        code, o, e = r.cli("run", "-", "-t", tid, stdin="click '#out p'\nclick '#out p'")
+        r.check("run: summary only on the last action step", o.count('"changes"') == 1
+                and o.rindex('"changes"') > o.index("## 2"), o + e)
+        # extract
+        r.cli("nav", base + "list", "-t", tid, "--summary", "none")
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".res", "--limit", "4", "sku=@data-sku",
+                           "name=h2", "price=.price", "url=a@href", "tags=.tag::all", "n=.tag::count")
+        res = json.loads(o) if code == 0 else {}
+        row = (res.get("rows") or [{}])[0]
+        r.check("extract rows: text, @attr, absolute href, ::all, ::count", res.get("count") == 6
+                and len(res["rows"]) == 4 and row == {"sku": "S1", "name": "Product 1", "price": "$3.00",
+                "url": base + "p/1", "tags": ["new", "sale"], "n": 2}, o + e)
+        r.check("extract: missing fields are null and counted", res.get("missing") == {"price": 1}
+                and res["rows"][2]["price"] is None, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "title=h1")
+        r.check("extract without --rows", code == 0 and json.loads(o) == {"title": "Results"}, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".nope", "name=h2")
+        r.check("extract: zero rows exits 2 with candidate containers", code == 2
+                and "div[data-sku] (6)" in e, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", "div[", "name=h2")
+        r.check("extract: bad selector exits 2 and names it", code == 2 and "'div['" in e, o + e)
+        code, o, e = r.cli("extract", "-t", tid, "--rows", ".res", "--format", "tsv", "sku=@data-sku", "price=.price")
+        r.check("extract --format tsv", code == 0 and o.splitlines()[:2] == ["sku\tprice", "S1\t$3.00"]
+                and len(o.splitlines()) == 7, o + e)
         r.cli("send", "Target.closeTarget", "-p", "targetId=" + tid)
     finally:
+        r.cli("send", "Browser.close")  # the real browser: msedge.exe hands off to it and exits
         r.cli("stop")
+        if os.name == "nt":  # anything still running from this profile
+            subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*%s*' } | "
+                            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+                            % os.path.basename(tmp)], capture_output=True)
         for p in procs:
             p.terminate()
         for p in procs:
@@ -186,7 +286,11 @@ def main():
                 p.wait(10)
             except subprocess.TimeoutExpired:
                 p.kill()
-        shutil.rmtree(tmp, ignore_errors=True)
+        for _ in range(10):  # Windows releases profile files a moment after the processes exit
+            shutil.rmtree(tmp, ignore_errors=True)
+            if not os.path.exists(tmp):
+                break
+            time.sleep(0.5)
     print("%d failure(s)" % r.failures)
     return 1 if r.failures else 0
 

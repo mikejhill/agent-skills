@@ -26,7 +26,11 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 2. **Launch flag** `--remote-debugging-port=9222`: no prompt, `/json/*` served. Chrome 136+
    ignores it for the default profile; it needs `--user-data-dir=<separate dir>` (a fresh
    profile without the user's logins). Only use this if the user asks for an isolated
-   browser; never kill or relaunch the user's browser yourself.
+   browser; never kill or relaunch the user's browser yourself. Edge signs a fresh profile in
+   with the Windows account and syncs extensions: add `--disable-sync --disable-extensions
+   --disable-features=msImplicitSignin`.
+   `msedge.exe` hands off to the real browser process and exits, so close it with
+   `send Browser.close`, not by the launcher's PID.
 
 ## Symptoms
 
@@ -42,7 +46,8 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 | Screenshot blank/hangs on a background tab | `send Target.activateTarget -p targetId=ID` first. |
 | `CDP error -32000 ... Not allowed` | Some methods are blocked on `chrome://`/`edge://` pages and extension pages. |
 | PowerShell breaks JSON args | Use `-p key=value` or `@params.json`. |
-| `click`/`wait` returns `"timeout": "page still busy"` | The page polls or animates constantly. Use `--for-text`/`--for-selector` with `--no-settle`, or lower `--timeout`. |
+| `"settle": "capped"` or `"timeout": "page still busy"` | `busy` names the hosts still loading (or `page:changing`). Use `--for-text`/`--for-selector` for the state you need, or lower `--settle-max`. |
+| Action returned before the page finished (data from another domain) | Add `--for-text`/`--for-selector`, or `--strict-settle` for the old every-request rule. |
 | `text` is empty or misses content | Cross-origin iframe: `targets --all`, then `text -t <iframe id>`. Hidden content needs `--hidden`. |
 | `a broker is already running for ...` | `--port`/`--browser` differ from the running broker's. `stop` first. |
 
@@ -57,6 +62,8 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 - Exits on: `stop`, idle timeout (default 3600 s since the last CLI request; set with
   `start --idle SEC`, which also updates a running broker, or `BROWSER_CONTROL_IDLE`),
   browser disconnect, or failed connect. It removes its state file on exit.
+- Tabs it attaches to get focus emulation (`Emulation.setFocusEmulationEnabled`), so a tab
+  in a covered or background window still runs timers and takes input at full speed.
 - One broker per user. To switch browsers: `stop`, then `--browser other start`.
 - `BROWSER_CONTROL_HOME=DIR` moves the state directory (isolated brokers for tests;
   `tests/smoke_test.py` uses it so it never touches the user's broker).

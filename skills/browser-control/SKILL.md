@@ -84,9 +84,19 @@ browser.py text -t 3F2A --max 3000
 Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 
 - **Never `sleep`.** `click`, `nav` and `wait` block until the page settles: no in-flight
-  XHR/fetch, no visible spinner or "Loading..." (one stuck on screen for 3 s is ignored), and URL + visible text unchanged for
-  `--quiet` (0.5 s). Add `--for-text`, `--for-selector`, `--for-gone` or `--for-url` to wait
-  for a specific state. They return `"timeout"` instead of failing if the page never settles.
+  same-site XHR/fetch/document/script, no visible spinner or "Loading..." (one stuck on screen
+  for 3 s is ignored), and URL + visible text unchanged for `--quiet` (0.3 s). Third-party
+  beacons, ads and images don't count. Settling stops after `--settle-max` (5 s) with
+  `"settle": "capped"`.
+- **Wait for the state you need.** `--for-text`, `--for-selector`, `--for-gone` or
+  `--for-url` return as soon as it holds (no settle unless `--settle`): the fastest wait.
+- **Actions report what changed.** `click`, `nav` and `key` return `changes`: on a new page
+  `url`, `title` and the first 6 lines; otherwise `added` lines, `removed` count, `focus`,
+  `new_controls`, `alerts`, or `{"changed": false}` (max 1200 chars; `more` points to the
+  rest). Act on it instead of calling `text` again. `text --changed` gives lines added since
+  your last `text` read. `--summary full|none` (or `BROWSER_CONTROL_SUMMARY`) widens or drops it.
+- **Read action output; never discard it** (`>/dev/null`, `| Out-Null`). `"timeout"`,
+  `"settle": "capped"` and `"busy": ["host:count"]` say the page may not be ready.
 - **Read with `text`, not `innerText`.** `text` pierces shadow DOM and same-origin iframes
   (where `document.body.innerText` returns nothing on Angular/Lit/Salesforce portals), shows
   form state (`[x]`, `[value]`), and trims with `--after MARKER`, `--grep REGEX -C N`,
@@ -94,17 +104,29 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 - **Click by label:** `click --text Edit --within "Shipping address"` finds visible
   buttons, links and roles by text (also in shadow DOM). A miss lists the clickable labels.
 - **Chain steps in one call** with `run` (one CLI command per line, `-t` applied to all,
-  stops at the first error). Do one `run` per page transition, then read its output:
+  stops at the first error). One call per page transition; batch only steps whose outcome
+  you can predict, guard them with `--expect-text`/`--expect-selector`/`--expect-url` (a
+  miss stops the run), and end with the step whose change summary you need. Never batch
+  past a submit the user must confirm. Output shows `## N ok` for passing steps and full
+  output for a failing step and the last one (`--echo all` for everything):
 
   ```text
   browser.py run - -t shop <<'EOF'
-  click --text Checkout
+  click --text Checkout --expect-text "Shipping"
   click --text Continue --for-text "Order summary"
   text --after "Order summary" --max 6000
   EOF
   ```
 
   PowerShell: pipe a here-string, `@'...'@ | python $b run - -t shop`.
+- **Extract, don't hand-write scrapers.** `extract` takes short `NAME=SPEC` fields instead
+  of inline `eval` JS (long commands cost model time):
+
+  ```text
+  browser.py extract -t shop --rows "div[data-component-type=s-search-result]" --limit 16 \
+    asin=@data-asin title=h2 price=".a-price .a-offscreen" url="h2 a@href"
+  ```
+
 - **Prefer the app's JSON.** SPA data usually arrives by XHR: after any `click`/`nav`
   (they enable network capture), `net -t T` lists responses and
   `body ID -t T -o orders.json` (or `body /api/orders --url`) saves one. Parse the file
@@ -128,11 +150,12 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `type TEXT -t T [-s SELECTOR] [--replace]` | Real text input into focused / selected element |
 | `key KEY... -t T [--settle]` | `Enter`, `Tab`, `Escape`, `ArrowDown`, `ctrl+a`, `x`, ... |
 | `wait -t T [WAIT]` | Settle and/or wait for a condition |
-| `text -t T [--after M] [--grep RE] [--max N]` | Visible text incl. shadow DOM, as plain lines |
+| `text -t T [--after M] [--grep RE] [--max N] [--changed]` | Visible text incl. shadow DOM, as plain lines; `--changed`: only lines new since the last read |
+| `extract NAME=SPEC... -t T [--rows CSS] [--limit N] [--format tsv]` | Fields from the page or each row: `CSS` (text), `CSS@attr`, `@attr` (row), `CSS::all\|count\|html` |
 | `eval EXPR -t T` | Run JS in the page; returns JSON value (nodes described). Top-level `await`, `let`, `@file.js`, `-` |
 | `net -t T [--grep S] [--since N] [--all]` | Recent XHR/fetch/document responses: `id status type mime url` |
 | `body ID -t T [-o FILE]` / `body SUBSTR --url` | Response body (by request id or URL substring) |
-| `run FILE\|- [-t T] [--keep-going]` | Run CLI steps (one per line) in one process |
+| `run FILE\|- [-t T] [--keep-going] [--echo last\|all]` | Run CLI steps (one per line) in one process |
 | `screenshot FILE -t T [--full]` | PNG/JPEG (by extension); `--full` = whole page |
 | `pdf FILE -t T [-p k=v]` | Print to PDF |
 | `send METHOD [JSON] [-p k=v ...] [-t T]` | Any low-level browser command (cookies, storage, emulation, ...). Prints `result` |
@@ -141,7 +164,10 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 | `batch FILE\|- [-t T]` | Low-level: JSON lines `{"method","params","target"}` in one call |
 
 `WAIT` = `--for-text T`, `--for-selector CSS`, `--for-gone T`, `--for-url S`, `--no-settle`,
-`--quiet SEC`, `--timeout SEC` (15), `--show [MARKER]` (print visible text after waiting).
+`--settle`, `--quiet SEC` (0.3), `--settle-max SEC` (5), `--strict-settle`, `--timeout SEC`
+(15, load and condition), `--show [MARKER]` (print visible text after waiting),
+`--summary brief|full|none` (change summary; actions only), `--expect-text T`,
+`--expect-selector CSS`, `--expect-url S` (exit 1 unless true afterwards).
 
 **Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
 commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).

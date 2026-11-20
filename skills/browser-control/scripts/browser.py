@@ -19,6 +19,7 @@ per command. Every CLI call talks to the broker over a token-protected localhost
     browser.py click SELECTOR -t TARGET    trusted mouse click at element center
     browser.py type TEXT -t TARGET [-s SELECTOR] [--replace]
     browser.py key Enter [ctrl+a ...] -t TARGET
+    browser.py extract -t TARGET NAME=SPEC... [--rows CSS]   structured fields / rows
     browser.py screenshot FILE -t TARGET [--full]
     browser.py pdf FILE -t TARGET [-p landscape=true ...]
     browser.py events [-t T] [-f PREFIX] [--since N] [--wait S] [--count N]
@@ -35,6 +36,7 @@ need no target.
 import argparse
 import base64
 import collections
+import io
 import json
 import os
 import secrets
@@ -52,15 +54,27 @@ DEFAULT_IDLE = 3600  # seconds without a CLI request before the broker exits
 # A new broker means a new approval prompt in the browser, so the default is long; override
 # with BROWSER_CONTROL_IDLE (seconds) or `start --idle`.
 IDLE_ENV = "BROWSER_CONTROL_IDLE"
+SUMMARY_ENV = "BROWSER_CONTROL_SUMMARY"  # brief (default) | full | none: change summary on actions
 CONNECT_WAIT = 120  # seconds to wait for the user to approve the browser prompt
 EVENT_BUFFER = 20000  # Network.enable on a busy SPA emits thousands of events per page
 INFLIGHT_MAX_AGE = 10.0  # ignore requests open longer than this (long-poll, streaming)
-INFLIGHT_SKIP = {"WebSocket", "EventSource", "Ping", "Media", "Manifest", "Prefetch"}
+INFLIGHT_SKIP = {"WebSocket", "EventSource", "Ping", "Media", "Manifest", "Prefetch"}  # --strict-settle
+# Settle (default): only these request types can keep a page busy, and only when same-site,
+# a main-frame document, or a third-party XHR/fetch younger than THIRD_PARTY_GRACE seconds.
+# Third-party beacons, ads, trackers and lazy images no longer reset the quiet window.
+SETTLE_TYPES = {"Document", "XHR", "Fetch", "Script"}
+THIRD_PARTY_GRACE = 1.5
+DEFAULT_QUIET = 0.3  # seconds of quiet that count as settled (--strict-settle: 0.5)
+# After a click or key press the page may react on a timer with no network (a menu that opens
+# 400 ms later). Until anything changes, the quiet window is this long instead.
+FIRST_QUIET = 0.5
+DEFAULT_SETTLE_MAX = 5.0  # cap on settling after load / condition; returns ok with "settle":"capped"
+SLD_SUFFIXES = {"co", "com", "net", "org", "gov", "ac", "edu", "ne", "or", "go", "ltd", "plc", "gob", "nic"}
 
 # In-page helper library, (re)defined idempotently before every eval, so it survives
 # navigations and SPA reloads with no separate injection step. Everything pierces open
 # shadow roots and same-origin iframes. Exposed to `eval` code as `__dt`.
-DT_VERSION = 3
+DT_VERSION = 6
 DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = (() => {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg', 'SVG']);
   const CLICKABLE = 'a,button,summary,label,select,option,input[type=button],input[type=submit],' +
@@ -111,8 +125,122 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
     if (o.grep) { const re = new RegExp(o.grep, 'i'); const ls = t.split('\n'); const c = o.context || 0; const keep = new Set();
       ls.forEach((l, i) => { if (re.test(l)) for (let j = i - c; j <= i + c; j++) keep.add(j); });
       t = ls.filter((l, i) => keep.has(i)).join('\n'); }
+    let prev = globalThis.__dtLastText; globalThis.__dtLastText = t;
+    if (o.changed) {
+      if (prev == null) t = '[no earlier text read in this document: full text]\n' + t;
+      else { const d = diffLines(prev.split('\n'), t.split('\n'));
+        t = d.added.length || d.removed ? d.added.join('\n') + (d.removed ? '\n[' + d.removed + ' lines removed]' : '')
+          : '[no change since the last text read]'; }
+    }
     const total = t.length, off = o.offset || 0, max = o.max || 8000;
     return { text: t.slice(off, off + max), total, more: Math.max(0, total - off - max) };
+  };
+  // Multiset line diff: lines of `b` not in `a` (document order) and how many of `a` are gone.
+  const diffLines = (a, b) => {
+    const n = new Map(); for (const l of a) n.set(l, (n.get(l) || 0) + 1);
+    const added = [];
+    for (const l of b) { const k = n.get(l) || 0; if (k) n.set(l, k - 1); else added.push(l); }
+    let removed = 0; for (const k of n.values()) removed += k;
+    return { added, removed };
+  };
+  // Change summary for actions: mark() before, changes() after settling. Kept on globalThis
+  // (not __dt) so a helper-version upgrade doesn't lose it; a new document starts empty.
+  const CONTROLS = 'a,button,input,select,textarea,[role=link],[role=button],[role=tab],[role=menuitem]';
+  const focusLabel = () => { let a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (!a || a === document.body) return null;
+    return (a.tagName.toLowerCase() + ' ' + (label(a) || a.getAttribute('name') || a.id || '')).trim().slice(0, 80); };
+  const alertTexts = () => [...new Set(qsa('[role=alert],[aria-live]:not([aria-live=off]),:invalid').filter(vis)
+    .map(e => e.matches(':invalid') && e.validationMessage ? (label(e) || e.name || e.tagName.toLowerCase()) + ': ' + e.validationMessage
+      : norm(e.innerText || e.textContent)).filter(Boolean))];
+  const snap = () => ({ url: location.href, title: document.title, focus: focusLabel(),
+    lines: deepText().split('\n').filter(Boolean),
+    controls: qsa(CONTROLS).filter(vis).map(label).filter(Boolean), alerts: alertTexts() });
+  // extract: structured fields from the page or from each repeated row (see cmd_extract).
+  const parseSpec = spec => {
+    let m = /^(.*)::(html|all|count)$/.exec(spec), mode = 'text', attr = null;
+    if (m) { spec = m[1]; mode = m[2]; }
+    m = /^(.*?)@([\w:-]+)$/.exec(spec);
+    if (m && (m[1].split('[').length === m[1].split(']').length)) { spec = m[1]; attr = m[2]; }
+    return { css: spec.trim(), mode, attr };
+  };
+  const extract = (o = {}) => {
+    const all = (css, root) => { try { return qsa(css, root); } catch (e) { throw { selector: css }; } };
+    const pickVis = l => o.hidden ? l : l.filter(vis);
+    const maxf = o.maxField || 200, cut = v => v.length > maxf ? v.slice(0, maxf - 1) + '\u2026' : v;
+    const val = (el, f) => {
+      if (f.attr) { let v = el.getAttribute(f.attr); if (v == null) return null;
+        if (['href', 'src', 'action'].includes(f.attr)) { try { v = new URL(v, document.baseURI).href; } catch (e) {} }
+        return cut(v); }
+      if (f.mode === 'html') return cut(el.innerHTML);
+      return cut(norm(el.innerText || el.textContent));
+    };
+    const fields = Object.entries(o.fields || {}).map(([k, v]) => [k, parseSpec(v)]);
+    const one = (root, isRow) => {
+      const r = {};
+      for (const [k, f] of fields) {
+        const els = f.css ? pickVis(all(f.css, root)).filter(e => e !== root) : (isRow ? [root] : []);
+        if (f.mode === 'count') { r[k] = els.length; continue; }
+        if (f.mode === 'all') { const v = els.map(e => val(e, f)).filter(x => x != null && x !== ''); r[k] = v.length ? v : null; continue; }
+        const v = els.length ? val(els[0], f) : null;
+        r[k] = v === '' ? null : v;
+      }
+      return r;
+    };
+    try {
+      if (!o.rows) return { value: one(document, false) };
+      const rows = pickVis(all(o.rows, document));
+      if (!rows.length) {
+        const sig = new Map();
+        for (const e of qsa('*')) {
+          if (!vis(e)) continue;
+          const data = [...e.attributes].map(a => a.name).find(n => n.startsWith('data-') && n !== 'data-reactid');
+          const cls = (e.getAttribute('class') || '').trim().split(/\s+/)[0];
+          const k = data ? e.tagName.toLowerCase() + '[' + data + ']' : cls ? e.tagName.toLowerCase() + '.' + cls : null;
+          if (k) sig.set(k, (sig.get(k) || 0) + 1);
+        }
+        return { norows: [...sig].filter(x => x[1] >= 5).sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0] + ' (' + x[1] + ')') };
+      }
+      const out = rows.slice(0, o.limit || 50).map(r => one(r, true));
+      const missing = {};
+      for (const r of out) for (const k in r) if (r[k] == null) missing[k] = (missing[k] || 0) + 1;
+      return { rows: out, count: rows.length, missing };
+    } catch (e) { if (e && e.selector) return { badSelector: e.selector }; throw e; }
+  };
+  const mark = () => { globalThis.__dtBefore = snap(); return true; };
+  const changes = (o = {}) => {
+    const full = o.mode === 'full', cap = full ? 2400 : 1200, maxAdded = full ? 30 : 12;
+    const ell = l => l.length > 160 ? l.slice(0, 159) + '\u2026' : l;
+    const b = globalThis.__dtBefore, a = snap(); globalThis.__dtBefore = a;
+    let r;
+    if (!b || o.nav) {
+      r = { url: a.url, title: a.title, head: a.lines.slice(0, 6).map(ell) };
+    } else {
+      r = {};
+      if (a.url !== b.url) r.url = a.url;
+      if (a.title !== b.title) r.title = a.title;
+      if (a.focus !== b.focus && a.focus) r.focus = a.focus;
+      const d = diffLines(b.lines, a.lines);
+      if (d.added.length) r.added = d.added.map(ell);
+      if (d.removed) r.removed = d.removed;
+      const nc = [...new Set(diffLines(b.controls, a.controls).added)].map(ell);
+      if (nc.length) r.new_controls = nc.slice(0, 15);
+      const al = a.alerts.filter(x => !b.alerts.includes(x)).map(ell);
+      if (al.length) r.alerts = al.slice(0, 5);
+      if (!Object.keys(r).length) return { changed: false };
+    }
+    const list = r.added ? 'added' : r.head ? 'head' : null;
+    const total = list ? r[list].length : 0;
+    let keep = list ? Math.min(total, list === 'head' ? 6 : maxAdded) : 0;
+    const build = () => { const x = Object.assign({}, r);
+      if (list) { x[list] = r[list].slice(0, keep);
+        if (keep < total) x.more = '+' + (total - keep) + ' more lines: text --after ' +
+          JSON.stringify((r[list][keep - 1] || '').slice(0, 40)); }
+      return x; };
+    let x = build();
+    while (JSON.stringify(x).length > cap && keep > 0) { keep--; x = build(); }
+    while (JSON.stringify(x).length > cap && x.new_controls && x.new_controls.length) { r.new_controls.pop(); x = build(); }
+    return x;
   };
   const find = (o = {}) => {
     let c = o.selector ? qsa(o.selector) : qsa(CLICKABLE);
@@ -167,16 +295,16 @@ DT_JS = r"""if (!globalThis.__dt || globalThis.__dt.v !== %d) globalThis.__dt = 
   // placeholders on screen), so it stops counting as busy.
   const STUCK = 3000, seenEl = new WeakMap(), seenTx = new Map();
   const fresh = (m, k) => { const n = Date.now(); if (!m.has(k)) m.set(k, n); return n - m.get(k) < STUCK; };
-  const sig = () => {
+  const sig = (strict) => {
     const t = deepText();
     const line = (t.match(/(^|\n)[^\n]{0,30}\b(loading|please wait)\b[^\n]*/i) || [])[0];
     const busy = (line && fresh(seenTx, line + '|' + location.href)) ||
       qsa(BUSY).filter(e => vis(e) && e.getBoundingClientRect().width > 0).map(e => fresh(seenEl, e)).includes(true);
-    return busy ? 'busy:' + Math.random() :
-      location.href + '|' + t.length + '|' + performance.getEntriesByType('resource').length;
+    return busy ? 'busy:' + Math.random() : location.href + '|' + t.length +
+      (strict ? '|' + performance.getEntriesByType('resource').length : '');
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep };
+  return { v: %d, roots, qsa, vis, label, deepText, text, find, pick, click, has, sig, sleep, mark, changes, extract };
 })();
 void 0;
 """ % (DT_VERSION, DT_VERSION)
@@ -454,6 +582,26 @@ def cands(ts):
 
 # ------------------------------------------------------------------------- broker
 
+def host_of(url):
+    u = (url or "").split("://", 1)
+    if len(u) < 2:
+        return ""
+    h = u[1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].rsplit("@", 1)[-1]
+    if h.startswith("["):
+        return h.split("]", 1)[0] + "]"
+    return h.split(":", 1)[0].lower()
+
+
+def site_of(host):
+    """Registrable domain: last 2 labels, or 3 under a 2-letter ccTLD with a generic second
+    level (example.co.uk). IP addresses and single labels are their own site."""
+    if not host or host.startswith("[") or host.replace(".", "").isdigit():
+        return host
+    labels = host.split(".")
+    n = 3 if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in SLD_SUFFIXES else 2
+    return ".".join(labels[-n:])
+
+
 class Broker:
     def __init__(self, endpoint, idle, token):
         self.endpoint, self.idle, self.token = endpoint, idle, token
@@ -466,7 +614,8 @@ class Broker:
         self.econd = threading.Condition()
         self.sessions = {}  # targetId -> sessionId
         self.sess_target = {}  # sessionId -> targetId
-        self.inflight = {}  # sessionId -> {requestId: start time}, once Network is enabled
+        self.inflight = {}  # sessionId -> {requestId: (start, type, host, main frame)}, once Network is enabled
+        self.done = {}  # sessionId -> {site: completed XHR/fetch count} (settle signature)
         self.net_on = set()  # sessionIds with Network.enable sent by the broker or a client
         self.attach_lock = threading.Lock()
         self.last_activated = None  # targetId of the last Target.activateTarget sent
@@ -515,14 +664,19 @@ class Broker:
                     if t:
                         self.sessions.pop(t, None)
                     self.inflight.pop(s, None)
+                    self.done.pop(s, None)
                     self.net_on.discard(s)
                 elif sid and m.startswith("Network."):
                     p = msg.get("params", {})
                     fl = self.inflight.setdefault(sid, {})
                     if m == "Network.requestWillBeSent" and p.get("type") not in INFLIGHT_SKIP:
-                        fl[p.get("requestId")] = time.time()
+                        fl[p.get("requestId")] = (time.time(), p.get("type"), host_of(p.get("request", {}).get("url")),
+                                                  p.get("frameId") == self.sess_target.get(sid))
                     elif m in ("Network.loadingFinished", "Network.loadingFailed"):
-                        fl.pop(p.get("requestId"), None)
+                        r = fl.pop(p.get("requestId"), None)
+                        if r and r[1] in ("XHR", "Fetch"):
+                            d = self.done.setdefault(sid, {})
+                            d[site_of(r[2])] = d.get(site_of(r[2]), 0) + 1
                 with self.econd:
                     self.seq += 1
                     self.events.append({"seq": self.seq, "t": round(time.time(), 3), "method": m,
@@ -580,8 +734,13 @@ class Broker:
                     return
                 sid = r["result"]["sessionId"]
                 fresh[tid] = sid
+            ours = tid not in fresh
+            if ours:  # see the real state, not our focus emulation
+                self.emulate_focus(sid, False)
             r = self.call("Runtime.evaluate", {"expression": "[document.visibilityState, document.hasFocus()]",
                                                "returnByValue": True}, sid, timeout=2)
+            if ours:
+                self.emulate_focus(sid, True)
             v = r.get("result", {}).get("result", {}).get("value")
             if isinstance(v, list) and len(v) == 2:
                 res[tid] = {"visible": v[0] == "visible", "focused": bool(v[1])}
@@ -596,6 +755,7 @@ class Broker:
         for tid, sid in list(fresh.items()):
             if tid == kept and tid not in self.sessions:
                 self.sessions[tid], self.sess_target[sid] = sid, tid
+                self.emulate_focus(sid, True)
             else:  # leave tabs we only peeked at as they were
                 self.call("Target.detachFromTarget", {"sessionId": sid}, timeout=0)
         return res
@@ -666,7 +826,15 @@ class Broker:
             raise ValueError("attach failed: %s" % r["error"].get("message"))
         sid = r["result"]["sessionId"]
         self.sessions[tid], self.sess_target[sid] = sid, tid
+        self.emulate_focus(sid, True)
         return tid, sid
+
+    def emulate_focus(self, sid, on):
+        """Make the tab act as visible and focused while we drive it. A tab in a covered,
+        minimized or background window is "hidden": timers throttle to 1/s or slower (settle
+        quits mid-chain, waits overrun) and mouse input takes seconds or is dropped. Also run
+        when `probe_focus` reuses a session, so the probe sees the real state."""
+        self.call("Emulation.setFocusEmulationEnabled", {"enabled": on}, sid, timeout=3)
 
     # --- CLI side
     def handle(self, req):
@@ -696,6 +864,7 @@ class Broker:
             if sess and "error" not in r and req["method"] in ("Network.enable", "Network.disable"):
                 (self.net_on.add if req["method"] == "Network.enable" else self.net_on.discard)(sess)
                 self.inflight.pop(sess, None)
+                self.done.pop(sess, None)
             if tid:
                 r["targetId"] = tid
             return r
@@ -734,46 +903,105 @@ class Broker:
             return None, (r.get("error") or res["exceptionDetails"]).get("text") or "evaluate failed"
         return res.get("result", {}).get("value"), None
 
+    def busy_requests(self, sid, site, now, strict):
+        """In-flight requests that keep the page from counting as settled."""
+        out = []
+        for st, typ, host, main in list(self.inflight.get(sid, {}).values()):
+            age = now - st
+            if age >= INFLIGHT_MAX_AGE:
+                continue
+            if not strict:
+                if typ not in SETTLE_TYPES:
+                    continue
+                same = site_of(host) == site or (typ == "Document" and main)
+                if not same and not (typ in ("XHR", "Fetch") and age < THIRD_PARTY_GRACE):
+                    continue
+            out.append(host or "?")
+        return out
+
     def wait(self, req):
+        r = self._wait(req)
+        if req.get("after"):  # e.g. the change summary, in the same broker call
+            v, err = self.evaluate(self.session_for(req["target"])[1], req["after"])
+            r["after"] = v if not err else {"error": err}
+        return r
+
+    def _wait(self, req):
         """Poll until `cond` holds, then (if settle) until the page is quiet.
 
-        Quiet = no in-flight XHR/fetch/document requests and no change in URL, visible text
-        length or completed-resource count for `quiet` seconds. Errors from evaluate (page
-        mid-navigation, context destroyed) count as "not ready", not failure.
+        Quiet = for `quiet` seconds: no busy request (same-site document/XHR/fetch/script, a
+        main-frame document, or a third-party XHR/fetch under 1.5 s old), no visible busy
+        indicator, and no change in URL, visible text length or completed same-site XHR/fetch
+        count. Settling stops after `settle_max` seconds with ok + "settle": "capped". With a
+        condition and no `settle`, one 0.1 s confirmation poll replaces settling. `strict`
+        restores the pre-2026-11-20 rules (any request type and origin, resource count, no cap).
+        `action` (click/key): until anything changes, the window is FIRST_QUIET, since UI often
+        reacts on a timer with no network.
+        Errors from evaluate (page mid-navigation, context destroyed) count as "not ready".
         """
         tid, sid = self.session_for(req["target"])
-        settle = req.get("settle", True)
+        settle, strict = req.get("settle", True), bool(req.get("strict"))
         if settle:
             self.ensure_network(sid)
         cond = req.get("cond")
-        quiet, timeout = float(req.get("quiet", 0.5)), float(req.get("timeout", 15))
+        quiet = float(req.get("quiet") or (0.5 if strict else DEFAULT_QUIET))
+        timeout = float(req.get("timeout", 15))
+        settle_max = None if strict else float(req.get("settle_max") or DEFAULT_SETTLE_MAX)
+        first_quiet = max(quiet, FIRST_QUIET) if req.get("action") and not strict else quiet
+        first_sig, changed = None, False
         t0 = time.time()
         end = t0 + timeout
         met_at = None
-        last_sig, last_change = None, t0
-        polls = 0
+        last_sig, last_change, busy = None, t0, []
         while True:
             now = time.time()
-            polls += 1
             if met_at is None:
                 ok, err = (True, None) if not cond else self.evaluate(sid, cond)
                 if ok and not err:
-                    met_at = now
-                    last_change = now
+                    met_at = last_change = now
+                    if cond and not settle:  # confirm once, so a flicker doesn't count
+                        time.sleep(0.1)
+                        ok, err = self.evaluate(sid, cond)
+                        if ok and not err:
+                            break
+                        met_at = None
             if met_at is not None:
                 if not settle:
                     break
-                sig, err = self.evaluate(sid, "__dt.sig()")
-                busy = sum(1 for st in self.inflight.get(sid, {}).values() if now - st < INFLIGHT_MAX_AGE)
+                sig, err = self.evaluate(sid, "__dt.sig(%s)" % ("true" if strict else "false"))
+                if not strict and isinstance(sig, str) and not sig.startswith("busy:"):
+                    site = site_of(host_of(sig.split("|", 1)[0]))
+                    sig += "|%d" % self.done.get(sid, {}).get(site, 0)
+                else:
+                    site = None
+                busy = self.busy_requests(sid, site, now, strict)
+                if first_sig is None and not err:
+                    first_sig = sig
+                changed = changed or bool(busy) or (first_sig is not None and sig != first_sig)
                 if err or busy or sig != last_sig:
                     last_sig, last_change = sig, now
-                elif now - last_change >= quiet:
+                elif now - last_change >= (quiet if changed else first_quiet):
                     break
+                if settle_max is not None and now - met_at >= settle_max:
+                    return dict({"targetId": tid, "ok": True, "settle": "capped",
+                                 "waited": round(now - t0, 2)}, **self.busy_report(busy, sig))
             if now >= end:
-                return {"targetId": tid, "ok": False, "cond_met": met_at is not None,
-                        "waited": round(now - t0, 2), "inflight": len(self.inflight.get(sid, {}))}
+                r = {"targetId": tid, "ok": False, "cond_met": met_at is not None,
+                     "waited": round(now - t0, 2), "inflight": len(self.inflight.get(sid, {}))}
+                if met_at is not None:
+                    r.update(self.busy_report(busy, last_sig))
+                return r
             time.sleep(0.1)
         return {"targetId": tid, "ok": True, "waited": round(time.time() - t0, 2)}
+
+    @staticmethod
+    def busy_report(busy, sig):
+        """Top 3 hosts still busy (host:count), or why the page itself kept changing."""
+        c = collections.Counter(busy)
+        r = ["%s:%d" % hc for hc in c.most_common(3)]
+        if not r:
+            r = ["page:busy-indicator" if isinstance(sig, str) and sig.startswith("busy:") else "page:changing"]
+        return {"busy": r}
 
     def get_events(self, req):
         since = req.get("since", 0)
@@ -1062,9 +1290,11 @@ def js_eval(args, expr, target, timeout=30):
     return r.get("result", {}).get("value")
 
 
-def broker_wait(args, target, cond=None, settle=True, quiet=0.5, timeout=15):
-    r = rpc({"op": "wait", "target": target, "cond": cond, "settle": settle, "quiet": quiet,
-             "timeout": timeout}, broker(args), timeout=timeout + 15)
+def broker_wait(args, target, cond=None, settle=True, quiet=None, timeout=15, action=False, after=None):
+    r = rpc({"op": "wait", "target": target, "cond": cond, "settle": settle, "quiet": quiet, "action": action,
+             "after": after,
+             "timeout": timeout, "settle_max": getattr(args, "settle_max", None),
+             "strict": getattr(args, "strict_settle", False)}, broker(args), timeout=timeout + 15)
     if "error" in r:
         raise CLIError(r["error"].get("message"))
     return r
@@ -1224,7 +1454,7 @@ def wait_event(st, method, target, since, timeout):
 def cmd_nav(args):
     st = broker(args)
     check(send(args, "Page.enable", {}, args.target))
-    if not args.no_wait and not args.no_settle:
+    if not args.no_wait and want_settle(args, wait_opts(args)):
         rpc({"op": "netwatch", "target": args.target}, st)
     seq = rpc({"op": "events", "since": 10 ** 12}, st)["last_seq"]
     r = check(send(args, "Page.navigate", {"url": args.url}, args.target))
@@ -1237,7 +1467,7 @@ def cmd_nav(args):
     res = {"frameId": r.get("frameId"), "loaded": (bool(ev) or same_doc) if not args.no_wait else None}
     if args.no_wait:
         return out(res, args)
-    out(after_action(args, res), args)
+    return emit(args, after_action(args, res, nav=True))
 
 
 def cmd_screenshot(args):
@@ -1276,21 +1506,80 @@ def wait_opts(args):
     return "__dt.has(%s)" % json.dumps(o) if o else None
 
 
-def after_action(args, res):
-    """Shared tail for click/key/nav: wait for a condition and/or quiet, then optional text."""
+def want_settle(args, cond):
+    """Settle after an action/wait? A --for-* condition replaces settling unless --settle."""
+    if getattr(args, "no_settle", False):
+        return False
+    if getattr(args, "settle", False):
+        return True
+    return not cond and getattr(args, "settle_default", True)
+
+
+def apply_wait(res, w, cond):
+    """Copy a broker wait result into command output; warn on stderr when it fell short."""
+    res["waited"] = w["waited"]
+    if not w["ok"]:
+        res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    elif w.get("settle"):
+        res["settle"] = w["settle"]
+    if w.get("busy"):
+        res["busy"] = w["busy"]
+    if not w["ok"] or w.get("settle"):
+        sys.stderr.write("warning: %s after %.1fs (busy: %s)\n" % (
+            res.get("timeout") or "settle capped", w["waited"], ", ".join(w.get("busy") or []) or "-"))
+
+
+def summary_mode(args):
+    m = getattr(args, "summary", None) or os.environ.get(SUMMARY_ENV) or "brief"
+    return m if m in ("brief", "full", "none") else "brief"
+
+
+def after_action(args, res, nav=False):
+    """Shared tail for click/key/nav: wait for a condition and/or quiet, then the change
+    summary (computed in the same broker call) and optional text."""
     cond = wait_opts(args)
-    if cond or not args.no_settle:
-        w = broker_wait(args, args.target, cond, settle=not args.no_settle, quiet=args.quiet,
-                        timeout=args.timeout)
-        res["waited"] = w["waited"]
-        if not w["ok"]:
-            res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    settle = want_settle(args, cond)
+    mode = summary_mode(args)
+    after = None if mode == "none" else "__dt.changes(%s)" % json.dumps({"mode": mode, "nav": nav})
+    if cond or settle:
+        w = broker_wait(args, args.target, cond, settle=settle, quiet=args.quiet, timeout=args.timeout,
+                        action=args.fn in (cmd_click, cmd_key), after=after)
+        apply_wait(res, w, cond)
+        ch = w.get("after")
+    else:
+        ch = js_eval(args, after, args.target) if after else None
+    if isinstance(ch, dict):
+        if "timeout" in res or res.get("settle") == "capped":
+            ch["settled"] = False
+        res["changes"] = ch
     if getattr(args, "show", None) is not None:
         o = {"max": args.max}
         if args.show:
             o["after"] = args.show
         res["text"] = js_eval(args, "__dt.text(%s)" % json.dumps(o), args.target)["text"]
+    return check_expect(args, res)
+
+
+def expect_opts(args):
+    o = {k: getattr(args, a) for k, a in (("text", "expect_text"), ("selector", "expect_selector"),
+                                          ("url", "expect_url")) if getattr(args, a, None)}
+    return o or None
+
+
+def check_expect(args, res):
+    """--expect-*: one check after waiting; a miss fails the step (stops a `run`)."""
+    o = expect_opts(args)
+    if o and not js_eval(args, "__dt.has(%s)" % json.dumps(o), args.target):
+        res["expect_failed"] = o
     return res
+
+
+def emit(args, res):
+    out(res, args)
+    if res.get("expect_failed"):
+        sys.stderr.write("error: expectation not met: %s\n" % json.dumps(res["expect_failed"]))
+        return 1
+    return 0
 
 
 def cmd_click(args):
@@ -1299,9 +1588,10 @@ def cmd_click(args):
     o = {"selector": args.selector, "text": args.text, "index": args.index, "exact": args.exact,
          "within": args.within, "hidden": args.hidden}
     o = {k: v for k, v in o.items() if v not in (None, False)}
-    if not args.no_settle:  # start network tracking before the click, not after it
+    if want_settle(args, wait_opts(args)):  # start network tracking before the click, not after it
         rpc({"op": "netwatch", "target": args.target}, broker(args))
-    p = js_eval(args, "__dt.pick(%s)" % json.dumps(o), args.target)
+    mark = "" if summary_mode(args) == "none" else "__dt.mark(), "  # snapshot in the same evaluate
+    p = js_eval(args, "(%s__dt.pick(%s))" % (mark, json.dumps(o)), args.target)
     if not p.get("found"):
         what = args.selector or args.text
         raise CLIError("no visible element matches %r (index %d of %d). Clickable labels: %s"
@@ -1316,12 +1606,13 @@ def cmd_click(args):
     else:  # covered, zero-size, or --dom: element.click() (untrusted, but no hit-testing)
         js_eval(args, "__dt.last.click()", args.target)
         res["via"] = "dom"
-    out(after_action(args, res), args)
+    return emit(args, after_action(args, res))
 
 
 def cmd_text(args):
     o = {"selector": args.selector, "after": args.after, "before": args.before, "grep": args.grep,
-         "context": args.context, "max": args.max, "offset": args.offset, "hidden": args.hidden}
+         "context": args.context, "max": args.max, "offset": args.offset, "hidden": args.hidden,
+         "changed": args.changed}
     r = js_eval(args, "__dt.text(%s)" % json.dumps({k: v for k, v in o.items() if v}), args.target)
     sys.stdout.write(r["text"] + "\n")
     if r["more"]:
@@ -1329,21 +1620,62 @@ def cmd_text(args):
                          % (r["more"], r["total"], (args.offset or 0) + args.max))
 
 
+EXTRACT_CAP = 8000
+
+
+def cmd_extract(args):
+    fields = {}
+    for f in args.fields:
+        k, eq, v = f.partition("=")
+        if not eq or not k:
+            raise CLIError("field %r: use NAME=SPEC (CSS, CSS@attr, @attr, CSS::html|all|count)" % f)
+        fields[k] = v
+    if not fields:
+        raise CLIError("give at least one NAME=SPEC field")
+    o = {"fields": fields, "rows": args.rows, "limit": args.limit, "maxField": args.max_field, "hidden": args.hidden}
+    r = js_eval(args, "__dt.extract(%s)" % json.dumps(o), args.target)
+    if r.get("badSelector"):
+        raise CLIError("invalid CSS selector: %r" % r["badSelector"])
+    if "norows" in r:
+        raise CLIError("--rows %r matches no visible element. Repeated containers: %s"
+                       % (args.rows, "; ".join(r["norows"]) or "none found"))
+    if "value" in r:
+        return out(r["value"], args)
+    rows, truncated = r["rows"], 0
+    if args.format == "tsv":
+        cell = lambda v: "" if v is None else (" | ".join(map(str, v)) if isinstance(v, list) else str(v)).replace(
+            "\t", " ").replace("\n", " ")
+        lines = ["\t".join(fields)] + ["\t".join(cell(row.get(k)) for k in fields) for row in rows]
+        while len("\n".join(lines)) > EXTRACT_CAP and len(lines) > 1:
+            lines.pop(); truncated += 1
+        sys.stdout.write("\n".join(lines) + "\n")
+        if truncated or r["missing"]:
+            sys.stderr.write("rows %d of %d%s; missing %s\n" % (len(lines) - 1, r["count"],
+                             " (%d truncated)" % truncated if truncated else "", json.dumps(r["missing"])))
+        return
+    res = {"rows": rows, "count": r["count"], "missing": r["missing"]}
+    while len(json.dumps(res, ensure_ascii=False)) > EXTRACT_CAP and res["rows"]:
+        res["rows"] = res["rows"][:-1]; truncated += 1
+    if truncated:
+        res["truncated"] = truncated
+    out(res, args)
+
+
 def cmd_wait(args):
     cond = wait_opts(args)
     if args.ms:
         time.sleep(args.ms / 1000.0)
-    w = broker_wait(args, args.target, cond, settle=not args.no_settle, quiet=args.quiet, timeout=args.timeout)
-    res = {"ok": w["ok"], "waited": w["waited"]}
-    if not w["ok"]:
-        res["timeout"] = "condition not met" if cond and not w.get("cond_met") else "page still busy"
+    w = broker_wait(args, args.target, cond, settle=want_settle(args, cond), quiet=args.quiet,
+                    timeout=args.timeout)
+    res = {"ok": w["ok"]}
+    apply_wait(res, w, cond)
     if args.show is not None:
         o = {"max": args.max}
         if args.show:
             o["after"] = args.show
         res["text"] = js_eval(args, "__dt.text(%s)" % json.dumps(o), args.target)["text"]
-    out(res, args)
-    return 0 if w["ok"] else 1
+    check_expect(args, res)
+    return emit(args, res) or (0 if w["ok"] else 1)
 
 
 def responses(args):
@@ -1394,7 +1726,7 @@ def cmd_body(args):
     sys.stdout.write(txt[:args.max] + ("\n[... %d more chars; use -o FILE]\n" % more if more > 0 else "\n"))
 
 
-TARGETED = {"send", "eval", "nav", "click", "type", "key", "screenshot", "pdf", "events", "text",
+TARGETED = {"extract", "send", "eval", "nav", "click", "type", "key", "screenshot", "pdf", "events", "text",
             "wait", "net", "body", "batch", "which", "activate", "close"}
 
 
@@ -1412,15 +1744,34 @@ def cmd_run(args):
     if args.target:  # pin the tab once: a URL selector may stop matching after a nav step
         args.target = check(rpc({"op": "which", "target": args.target}, broker(args)))["target"]["targetId"]
     rc = 0
+    parsed = [shlex.split(l, posix=True) for l in steps]
+    actions = [i for i, t in enumerate(parsed, 1) if t and t[0] in ("click", "nav", "key")]
+    mode = args.summary or os.environ.get(SUMMARY_ENV)
     for i, line in enumerate(steps, 1):
-        toks = shlex.split(line, posix=True)
+        toks = parsed[i - 1]
+        # only the last action step reports a change summary, unless --summary full
+        if i in actions and "--summary" not in toks and mode != "full" and (i != actions[-1] or mode == "none"):
+            toks += ["--summary", "none"]
         if toks and toks[0] in ("run", "start", "stop"):
             raise CLIError("step %d: %r is not allowed inside run" % (i, toks[0]))
         if args.target and toks and toks[0] in TARGETED and "-t" not in toks and "--target" not in toks:
             toks += ["-t", args.target]
-        sys.stdout.write("## %d %s\n" % (i, line[:120]))
-        sys.stdout.flush()
-        code = main(glob + toks, nested=True)
+        last = i == len(steps)
+        if args.echo == "all":
+            sys.stdout.write("## %d %s\n" % (i, line[:120]))
+            sys.stdout.flush()
+            code = main(glob + toks, nested=True)
+        else:  # last: one line per passing step; full output for a failing step and the last one
+            buf, real = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                code = main(glob + toks, nested=True)
+            finally:
+                sys.stdout = real
+            if code or last:
+                sys.stdout.write("## %d %s\n%s" % (i, line[:120], buf.getvalue()))
+            else:
+                sys.stdout.write("## %d ok %s\n" % (i, line[:80]))
         sys.stdout.flush()
         if code:
             rc = code
@@ -1443,6 +1794,8 @@ def cmd_type(args):
 
 
 def cmd_key(args):
+    if summary_mode(args) != "none":
+        js_eval(args, "__dt.mark()", args.target)
     for combo in args.keys:
         parts = combo.split("+")
         key, mods = parts[-1], 0
@@ -1461,8 +1814,7 @@ def cmd_key(args):
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyDown" if text else "rawKeyDown",
                                                        **({"text": text} if text else {})), args.target))
         check(send(args, "Input.dispatchKeyEvent", dict(ev, type="keyUp"), args.target))
-    args.no_settle = not args.settle
-    out(after_action(args, {"pressed": args.keys}), args)
+    return emit(args, after_action(args, {"pressed": args.keys}))
 
 
 def cmd_pdf(args):
@@ -1540,12 +1892,23 @@ def add_wait_flags(p, settle_default=True):
     g.add_argument("--for-selector", metavar="CSS", help="wait until a visible element matches CSS")
     g.add_argument("--for-gone", metavar="TEXT", help="wait until TEXT is no longer visible (spinners)")
     g.add_argument("--for-url", metavar="SUBSTR", help="wait until location.href contains SUBSTR")
+    p.set_defaults(settle_default=settle_default)
     if settle_default:
         g.add_argument("--no-settle", action="store_true", help="skip waiting for network/DOM quiet")
-    else:
-        g.add_argument("--settle", action="store_true", help="wait for network/DOM quiet afterwards")
-    g.add_argument("--quiet", type=float, default=0.5, help="quiet period in seconds (default 0.5)")
-    g.add_argument("--timeout", type=float, default=15, help="max seconds to wait (default 15)")
+    g.add_argument("--settle", action="store_true",
+                   help="settle even with a --for-* condition (by default the condition replaces settling)")
+    g.add_argument("--quiet", type=float, help="quiet period in seconds (default %s; strict 0.5)" % DEFAULT_QUIET)
+    g.add_argument("--settle-max", type=float, metavar="SEC",
+                   help="stop settling after SEC, return ok with \"settle\":\"capped\" (default %s)"
+                        % DEFAULT_SETTLE_MAX)
+    g.add_argument("--strict-settle", action="store_true",
+                   help="old rules: any request type/origin and resource loads count; no cap")
+    g.add_argument("--timeout", type=float, default=15, help="max seconds for load and condition (default 15)")
+    g.add_argument("--expect-text", metavar="TEXT", help="fail (exit 1, stops a run) unless TEXT is visible afterwards")
+    g.add_argument("--expect-selector", metavar="CSS", help="fail unless a visible element matches CSS afterwards")
+    g.add_argument("--expect-url", metavar="SUBSTR", help="fail unless location.href contains SUBSTR afterwards")
+    g.add_argument("--summary", choices=("brief", "full", "none"),
+                   help="change summary after the action (default brief, or $%s)" % SUMMARY_ENV)
     g.add_argument("--show", nargs="?", const="", metavar="AFTER",
                    help="print visible text afterwards (optionally only after marker AFTER)")
     g.add_argument("--max", type=int, default=4000, help="max chars for --show (default 4000)")
@@ -1623,7 +1986,19 @@ def main(argv=None, nested=False):
     p.add_argument("--max", type=int, default=8000, help="max chars (default 8000)")
     p.add_argument("--offset", type=int, default=0, help="skip this many chars (paging)")
     p.add_argument("--hidden", action="store_true", help="include invisible text")
+    p.add_argument("--changed", action="store_true",
+                   help="only lines added since the last text read of this page (+ removed count)")
     p.set_defaults(fn=cmd_text)
+    p = sub.add_parser("extract", help="structured fields from the page or from repeated rows")
+    p.add_argument("fields", nargs="+", metavar="NAME=SPEC",
+                   help="SPEC: CSS (text), CSS@attr, @attr (row itself), CSS::html, CSS::all, CSS::count")
+    tgt(p, True)
+    p.add_argument("--rows", metavar="CSS", help="one result per matching element; fields are scoped to it")
+    p.add_argument("--limit", type=int, default=50, help="max rows (default 50)")
+    p.add_argument("--max-field", type=int, default=200, help="max chars per value (default 200)")
+    p.add_argument("--format", choices=("json", "tsv"), default="json")
+    p.add_argument("--hidden", action="store_true", help="include invisible elements")
+    p.set_defaults(fn=cmd_extract)
     p = sub.add_parser("wait", help="wait for a condition and/or network+DOM quiet (instead of sleep)")
     tgt(p, True); add_wait_flags(p)
     p.add_argument("--ms", type=int, default=0, help="fixed delay first (rarely needed)")
@@ -1639,6 +2014,10 @@ def main(argv=None, nested=False):
     p.add_argument("--max", type=int, default=8000); p.set_defaults(fn=cmd_body)
     p = sub.add_parser("run", help="run CLI steps from FILE or - (one per line) in one process")
     p.add_argument("file"); tgt(p); p.add_argument("--keep-going", action="store_true")
+    p.add_argument("--summary", choices=("brief", "full", "none"),
+                   help="brief (default): change summary on the last action step only; full: every action step")
+    p.add_argument("--echo", choices=("last", "all"), default="last",
+                   help="last (default): full output only for a failing step and the last step; all: every step")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("pdf"); p.add_argument("file"); tgt(p, True)
     p.add_argument("-p", action="append", metavar="KEY=VALUE", help="Page.printToPDF param")

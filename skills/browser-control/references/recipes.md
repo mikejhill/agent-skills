@@ -20,26 +20,66 @@ component portals (Salesforce, many Angular/Lit enterprise apps) use `text` and 
 
 ```
 C click --text Continue -t T                      # click, then settle (network + DOM quiet)
-C click --text Continue -t T --for-text "Step 2"  # ...and require this text
-C nav URL -t T --for-selector "table.results"     # load event, then condition, then settle
-C wait -t T --for-gone "Loading"                  # spinner gone, then settle
-C wait -t T --for-url "/summary" --no-settle      # condition only
+C click --text Continue -t T --for-text "Step 2"  # ...return once this text shows (no settle)
+C nav URL -t T --for-selector "table.results"     # load event, then condition
+C wait -t T --for-gone "Loading" --settle         # spinner gone, then settle too
+C nav URL -t T --strict-settle                    # old rules: every request counts, no cap
 ```
 
-Settled = no in-flight XHR/fetch/document request (ignoring ones open > 10 s), no visible
-spinner/`aria-busy`/"Loading...", and URL + visible text length unchanged for `--quiet`
-seconds (0.5). Timeouts (`--timeout`, 15 s) return `"timeout": ...` with exit 0 for
-`click`/`nav` and exit 1 for `wait`, so check the field. Polling in-page is still possible:
+Settled = for `--quiet` seconds (0.3; 0.5 after a `click`/`key` until anything changes):
+
+- no busy request: a same-site XHR/fetch/document/script, the tab's own document, or a
+  third-party XHR/fetch under 1.5 s old (requests open > 10 s are ignored)
+- no visible spinner/`aria-busy`/"Loading..."
+- URL, visible text length and completed same-site XHR/fetch count unchanged
+
+Same-site = same registrable domain (`api.shop.com` ~ `www.shop.com`). Settling stops after
+`--settle-max` (5 s): ok, plus `"settle": "capped"` and `"busy": ["host:count", ...]`.
+A `--for-*` condition replaces settling (one 0.1 s confirmation poll) unless `--settle`.
+Timeouts (`--timeout`, 15 s, for load and condition) return `"timeout": ...` with exit 0 for
+`click`/`nav` and exit 1 for `wait`, so check the field. Capped and timed-out waits also
+print a `warning:` line on stderr. Polling in-page is still possible:
 
 ```
 C eval "await new Promise((ok, no) => { const t0 = Date.now(); (function f(){ const e = __dt.qsa('#result')[0]; if (e) ok(e.innerText); else if (Date.now() - t0 > 10000) no(new Error('timeout')); else setTimeout(f, 100); })(); })" -t T
 ```
 
+## Extract
+
+```
+C extract -t T title=h1 price="#price" image="#main img@src"         # one object
+C extract -t T --rows "li.result" --limit 20 name=h3 url="a@href" id=@data-id tags=".tag::all"
+# {"rows": [{...}], "count": 37, "missing": {"price": 2}}
+C extract -t T --rows "tr" --format tsv cells="td::all"              # header + one line per row
+```
+
+- Fields are scoped to each row; visible elements only unless `--hidden`.
+- Text is whitespace-collapsed and cut at `--max-field` (200); `href`/`src` are absolute.
+- A missing field is `null` and counted in `missing`; output is capped at 8000 chars
+  (`truncated`: rows dropped).
+- `--rows` matching nothing exits 2 and lists repeated containers to try.
+
+## Change summaries
+
+```
+C click --text Save -t T
+# {"clicked": "Save", ..., "changes": {"added": ["Saved"], "removed": 1, "alerts": ["Saved"]}}
+C click --text Next -t T
+# {"changes": {"url": ".../step2", "added": ["Step 2 of 3", ...], "more": "+40 more lines: text --after \"...\""}}
+C text -t T --changed                             # only lines new since the last `text` read
+```
+
+A new document gives `url`, `title`, `head` (first 6 lines). Nothing changed gives
+`{"changed": false}`. `"settled": false` means the page may still be loading. In `run`, only
+the last `click`/`nav`/`key` step reports a summary unless `run --summary full`.
+
 ## Multi-step runs
 
-`run` executes CLI lines in one process (shared `-t`, `##` headers per step, stops at the
-first failing step unless `--keep-going`). Use it for each page transition: action, wait,
-read.
+`run` executes CLI lines in one process (shared `-t`, stops at the first failing step
+unless `--keep-going`). Use it for each page transition: action, wait, read. By default
+(`--echo last`) passing steps print one `## N ok ...` line; a failing step and the last
+step print in full. `--expect-text`/`--expect-selector`/`--expect-url` on a step fail it
+(exit 1) when the page doesn't show what you predicted, so a wrong click stops the batch.
 
 ```
 C run - -t T <<'EOF'

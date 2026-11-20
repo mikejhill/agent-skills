@@ -54,3 +54,35 @@ the purpose.
   background where possible, so the prompt overlaps planning. Goal 1 changed from "one
   approval per task" to "one approval per broker run" (operator decision). `start --idle`
   rejects values <= 0 and warns when the running broker is too old to update.
+- 2026-11-20: [agent] Smarter settling, from the same study: ad-heavy retail navs took
+  10-26 s because third-party beacons and lazy images kept resetting the quiet window. Only
+  same-site document/XHR/fetch/script requests (plus the tab's own document and third-party
+  XHR/fetch under 1.5 s old) count as busy; the signature uses completed same-site XHR/fetch
+  instead of every resource. `--quiet` 0.5 -> 0.3 s, but 0.5 s after a click/key until
+  anything changes (timer-driven UI). New `--settle-max` (5 s, returns `"settle": "capped"`
+  with `busy` hosts and a stderr warning), `--for-*` replaces settling unless `--settle`,
+  `--strict-settle` keeps the old rules. Simple nav 0.66 -> 0.46 s on the fixture.
+- 2026-11-20: [agent] Change summaries: 52 of 147 calls in the study only looked at the page,
+  17 right after an action. `click`/`nav`/`key` now return `changes` (added lines, removed
+  count, focus, new controls, alerts; capped at 1200 chars), computed in the settle call;
+  click snapshots in its existing pick evaluate. `text --changed` diffs against the last
+  `text` read. `--summary brief|full|none`, `BROWSER_CONTROL_SUMMARY`; `run` summarizes only
+  its last action step. Dialog reporting from the design was left out (needs Page events on
+  every tab).
+- 2026-11-20: [agent] `extract`: 59 of 88 `eval` calls in the study carried 400+ char inline
+  scrapers, and long commands cost ~0.34 s of model time per 100 chars. `extract NAME=SPEC
+  [--rows CSS]` covers text, attributes (absolute URLs), `::all`, `::count` and `::html`, with
+  `missing` counts, an 8000-char cap, `--format tsv`, and candidate containers when `--rows`
+  matches nothing. One evaluate, no broker change.
+- 2026-11-20: [agent] `run` refinements (modest win: agents already chain with `;`, and
+  batching hides intermediate state). `--echo last` (default) prints one line per passing
+  step and full output for a failing or last step; `--echo all` is the old output.
+  `--expect-text`/`--expect-selector`/`--expect-url` on click/nav/key/wait fail the step
+  (exit 1) when unmet, so a wrong click stops a batch. SKILL.md: one call per page
+  transition, batch only predictable steps, never past a submit the user must confirm.
+- 2026-11-20: [agent] Hidden tabs, found testing on local Edge: a tab in a covered,
+  minimized or background window is "hidden", so timers throttle to 1/s or slower (settle
+  declared quiet mid-chain; waits overran) and mouse clicks took ~5 s or were dropped. The
+  broker now turns on focus emulation for each tab it attaches to, so driven tabs act
+  visible and focused; `active`/`--focus` probes switch it off briefly to read the real
+  state. Smoke test: UTF-8 subprocess output and full process-tree teardown on Windows.
