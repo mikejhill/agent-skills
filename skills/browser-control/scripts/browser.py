@@ -188,6 +188,13 @@ def with_dt(expr):
 
 # --------------------------------------------------------------------------- paths
 
+def positive_int(v):
+    n = int(v)
+    if n <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return n
+
+
 def default_idle():
     try:
         v = int(os.environ.get(IDLE_ENV, ""))
@@ -1078,7 +1085,10 @@ def cmd_status(args):
 def cmd_start(args):
     st = ensure_broker(args)
     if args.idle:  # also applies to a broker that was already running
-        rpc({"op": "idle", "idle": args.idle}, st)
+        r = rpc({"op": "idle", "idle": args.idle}, st)
+        if "error" in r:  # a broker started by an older browser.py has no `idle` op
+            sys.stderr.write("warning: the running broker predates `start --idle` updates; it keeps its "
+                             "current idle timeout until it exits and restarts\n")
     out(rpc({"op": "status"}, st), args)
 
 
@@ -1554,7 +1564,7 @@ def main(argv=None, nested=False):
                        help="tab: id or prefix, active, url:S, title:S, URL, host, or URL/title substring")
 
     sub.add_parser("status").set_defaults(fn=cmd_status)
-    p = sub.add_parser("start"); p.add_argument("--idle", type=int,
+    p = sub.add_parser("start"); p.add_argument("--idle", type=positive_int,
                                                 help="exit after N idle seconds (default %d, or $%s); "
                                                      "also updates a running broker" % (DEFAULT_IDLE, IDLE_ENV))
     p.set_defaults(fn=cmd_start)
