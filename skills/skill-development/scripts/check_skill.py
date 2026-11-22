@@ -23,7 +23,7 @@ SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "all
 EXTENSION_KEYS = {"disable-model-invocation", "user-invocable", "argument-hint"}
 # Words ending in "ing" that are not gerunds.
 NOT_GERUNDS = {"string", "thing", "ring", "spring", "king", "wing", "ping", "bring", "sing", "swing"}
-LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
 
 SKILL_LINES_WARN = 200
@@ -49,6 +49,8 @@ def split_frontmatter(text: str) -> tuple[str | None, str | None]:
 
 def _plain_scalar(raw: str) -> tuple[object, str | None]:
     """Interpret one single-line YAML scalar the way a YAML loader would."""
+    if raw[:1] == '"' and "\\" in raw:
+        return None, "uses a backslash escape; use single quotes or a '>-' block"
     if raw[:1] in ("'", '"'):
         q = raw[0]
         close = raw.find(q, 1)
@@ -61,6 +63,10 @@ def _plain_scalar(raw: str) -> tuple[object, str | None]:
             return None, "text after a quoted string"
         body = raw[1:close]
         return (body.replace("''", "'") if q == "'" else body), None
+    if raw.startswith("#"):
+        return None, None  # comment only: YAML reads null
+    if raw.startswith("- ") or raw == "-":
+        return None, "is a YAML sequence item, not a string"
     value = re.split(r"\s#", raw, maxsplit=1)[0].strip()
     if value[:1] in ("[", "{"):
         return value, "is a YAML collection, not a string"
@@ -99,7 +105,11 @@ def parse_frontmatter_subset(src: str) -> tuple[dict[str, object], str | None]:
         while i < len(lines) and (not lines[i].strip() or lines[i][0].isspace()):
             block.append(lines[i])
             i += 1
+        filled = [b for b in block if b.strip()]
+        indents = {len(b) - len(b.lstrip()) for b in filled}
         if re.match(r"^[>|][+-]?(\s+#.*)?$", raw):
+            if filled and min(indents) != len(filled[0]) - len(filled[0].lstrip()):
+                return fields, f"'{key}' block is less indented after its first line"
             parts = [b.strip() for b in block]
             fields[key] = (" " if raw[0] == ">" else "\n").join(p for p in parts if p)
         elif raw:
@@ -111,6 +121,8 @@ def parse_frontmatter_subset(src: str) -> tuple[dict[str, object], str | None]:
             fields[key] = value
         else:
             sub: dict[str, object] = {}
+            if len({len(b) - len(b.lstrip()) for b in filled if not b.lstrip().startswith("#")}) > 1:
+                return fields, f"'{key}' entries are not evenly indented (only one level is supported)"
             for b in block:
                 if not b.strip() or b.lstrip().startswith("#"):
                     continue
@@ -151,13 +163,18 @@ def type_errors(fields: dict[str, object]) -> list[str]:
 
 def sidecar_disables_implicit(text: str) -> bool:
     """True if agents/openai.yaml sets policy.allow_implicit_invocation: false as a direct child."""
-    in_policy, child_indent, found = False, None, False
+    in_policy, child_indent, found, seen_policy = False, None, False, False
     for line in text.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
         if indent == 0:
-            in_policy, child_indent = re.fullmatch(r"policy:\s*(#.*)?", line.strip()) is not None, None
+            key = line.split(":", 1)[0].strip()
+            if key == "policy" and seen_policy:
+                return False  # duplicate policy: ambiguous
+            in_policy = re.fullmatch(r"policy:\s*(#.*)?", line.strip()) is not None
+            seen_policy = seen_policy or key == "policy"
+            child_indent = None
             continue
         if not in_policy:
             continue
@@ -193,6 +210,7 @@ def strip_code(text: str) -> str:
 class Checker:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self.skill_text = ""
         self.findings: list[dict[str, str]] = []
 
     def read(self, path: Path) -> str | None:
@@ -210,6 +228,7 @@ class Checker:
         text = self.read(self.root / "SKILL.md")
         if text is None:
             return self.findings
+        self.skill_text = text
         fields, err = parse_frontmatter(text)
         if err:
             self.add("error", err)
@@ -263,6 +282,8 @@ class Checker:
             self.add("error", "both invocation paths are disabled; the skill is unreachable")
         sidecar = self.root / "agents" / "openai.yaml"
         sidecar_text = self.read(sidecar) if sidecar.is_file() else ""
+        if user_only and not re.search(r"explicitly invoke", self.skill_text, re.I):
+            self.add("error", "user-only skill must say 'Run only when the user explicitly invokes it' in its description or body")
         if user_only and not sidecar_disables_implicit(sidecar_text or ""):
             self.add("error", "user-only skill needs agents/openai.yaml setting policy.allow_implicit_invocation: false")
         compat = fields.get("compatibility")
@@ -338,10 +359,12 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     skills, missing = find_skills([p.resolve() for p in args.paths])
+    findings = [{"skill": str(m), "level": "error", "message": "no SKILL.md here or in its subfolders"} for m in missing]
     if not skills:
+        if args.json:
+            print(json.dumps({"skills": 0, "errors": len(findings), "findings": findings}, indent=2))
         print("error: no folder with a SKILL.md found", file=sys.stderr)
         return 2
-    findings = [{"skill": str(m), "level": "error", "message": "no SKILL.md here or in its subfolders"} for m in missing]
     findings += [f for s in skills for f in Checker(s).run()]
     errors = sum(f["level"] == "error" for f in findings)
 

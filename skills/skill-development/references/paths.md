@@ -43,7 +43,7 @@ def system_temp(skill: str) -> Path:
 
 def env_root(var: str, default: Path) -> Path:
     value = os.environ.get(var, "")
-    return Path(value) if os.path.isabs(value) else default  # ignore relative values
+    return Path(value) if value and Path(value).is_absolute() else default  # ignore relative values
 
 def user_cache(skill: str) -> Path:
     if sys.platform == "win32":
