@@ -14,7 +14,7 @@ Choose by lifetime and audience:
 
 - **Workspace scratch** holds intermediate results, logs, and checkpoints for work in one project. Ensure `.tmp/` is gitignored before writing there.
 - **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
-- **Agent scratch** holds working directories outside any workspace, such as a clone to review a branch or a verification directory. One directory per use, named `<kind>-<YYYYMMDD-HHMMSS>-<slug>`, removed when the task ends. The `temp-storage` instruction defines its lifetime and a sweep for stale entries.
+- **Agent scratch** holds working directories outside any workspace, such as a clone to review a branch or a verification directory. One directory per use, named `<kind>-<YYYYMMDD-HHMMSS>-<slug>`, removed when the task ends. Worktrees, caches, and job state are not scratch. The `temp-storage` instruction defines its lifetime, the `KEEP` marker, and a sweep for stale entries.
 - **Config** honors `XDG_CONFIG_HOME` on every OS. It holds settings and credentials the user creates. Scripts read it. Agents never write credentials. See [cli.md](cli.md).
 - **Cache and state** holds data a script can rebuild, such as probe results, broker state, or downloads.
 

@@ -33,12 +33,11 @@ and 2.1.327.
 | A different repository | `--cwd PATH` |
 
 For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current. With no local clone, clone into the agent scratch root defined by the
-`temp-storage` instruction (`<system-temp>/agent-skills/scratch/clone-<YYYYMMDD-HHMMSS>-<slug>/`),
-reuse it for later review rounds, and remove it when the review loop ends, also when
-it fails. Ask the reviewer not to run the test suite: on Windows, files that tests
-create inside the Codex sandbox can be owned by the sandbox account and need an admin
-shell to delete.
+current. With no local clone, clone into the scratch root defined by the
+`temp-storage` instruction (`<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`), reuse it
+for later review rounds, and remove it when the review loop ends, also when it fails.
+After a `--fix` run, move the fixes to the intended checkout (or keep the clone and
+report its path) before removing it.
 
 ## Fixing: `--fix`
 
