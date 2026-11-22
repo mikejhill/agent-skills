@@ -144,6 +144,16 @@ class CheckSkillTest(unittest.TestCase):
         (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollowing `other-skill` for frameworks.\n", encoding="utf-8")
         self.assertTrue(any("'other-skill'" in m for _, m in levels(d)))
 
+    def test_coupling_paths_and_filenames(self) -> None:
+        make_skill(self.root, "session-handoff", "name: session-handoff\ndescription: D.\n")
+        make_skill(self.root, "project-setup", "name: project-setup\ndescription: D.\n")
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body="Run `python3 ../session-handoff/scripts/x.py`.\n")
+        self.assertTrue(any("'session-handoff'" in m for _, m in levels(d)))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow python-project-setup.instructions.md.\n", encoding="utf-8")
+        msgs = [m for _, m in levels(d)]
+        self.assertTrue(any("instruction 'python-project-setup'" in m for m in msgs))
+        self.assertFalse(any("skill 'project-setup'" in m for m in msgs))
+
     def test_coupling_instruction_names(self) -> None:
         (self.root / "instructions").mkdir()
         (self.root / "instructions" / "general.instructions.md").write_text("# g\n", encoding="utf-8")

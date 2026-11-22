@@ -334,8 +334,6 @@ class Checker:
     def check_coupling(self) -> None:
         """Warn when agent-facing text names a sibling skill or instruction file."""
         names = coupling_names(self.root)
-        if not names:
-            return
         docs = [self.root / "SKILL.md"]
         refs = self.root / "references"
         if refs.is_dir():
@@ -345,17 +343,21 @@ class Checker:
             if text is None:
                 continue
             prose = strip_code_blocks(text)
+            where = doc.relative_to(self.root).as_posix()
+            hits: set[tuple[str, str]] = set()
+            # Any instruction filename is an explicit dependency, installed or not.
+            for m in re.finditer(r"(?<![\w.-])([a-z0-9]+(?:-[a-z0-9]+)*)\.instructions\.md\b", prose):
+                hits.add(("instruction", m.group(1)))
+            # Known siblings: inline code, a path component, or a hyphenated name next to its type.
             for kind, name in names:
-                n = re.escape(name)
-                # Unambiguous references only: the name in inline code, an instruction
-                # filename, or a hyphenated name next to its type. Plain words such as
-                # "general" are ordinary prose.
-                pattern = rf"`{n}(?:\.instructions\.md)?`|\b{n}\.instructions\.md\b"
+                n = rf"(?<![\w.-]){re.escape(name)}(?![\w-]|\.instructions)"
+                pattern = rf"`{re.escape(name)}`|(?:^|[/\\]){re.escape(name)}[/\\]|\.\.[/\\]{re.escape(name)}\b"
                 if "-" in name:
-                    pattern += rf"|\b{n}\b(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+\b{n}\b"
-                if re.search(pattern, prose):
-                    where = doc.relative_to(self.root).as_posix()
-                    self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
+                    pattern += rf"|{n}(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+{n}"
+                if re.search(pattern, prose, re.M):
+                    hits.add((kind, name))
+            for kind, name in sorted(hits):
+                self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
 
     def check_links(self) -> None:
         docs = [self.root / "SKILL.md", self.root / "README.md"]

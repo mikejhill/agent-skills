@@ -111,7 +111,7 @@ Keep in `SKILL.md` only what every run needs. Move everything else out, and link
 | --- | --- |
 | Scratch output tied to a workspace | `<workspace>/.tmp/<skill-name>/` (gitignored) |
 | Temp output with no workspace, or for the user | `<system-temp>/agent-skills/<skill-name>/` (Unix: `agent-skills-<uid>`) |
-| Working directories with no workspace (clones, verification) | `<system-temp>/agent-skills/scratch/<kind>-<YYYYMMDD-HHMMSS>-<slug>/` (Unix: `agent-skills-<uid>`), removed when the task ends |
+| Working directories with no workspace (clones, verification) | `<system-temp>/agent-skills/scratch/<kind>-<YYYYMMDD-HHMMSS>-<slug>/` (Unix: `agent-skills-<uid>`), removed when the task ends unless it holds unique work |
 | User configuration | `~/.config/agent-skills/<skill-name>/` |
 | Cache and persistent state | `<user-cache>/agent-skills/<skill-name>/` |
 
