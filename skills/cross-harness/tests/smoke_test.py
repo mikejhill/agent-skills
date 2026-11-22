@@ -275,6 +275,32 @@ def _():
     assert a[a.index("-s") + 1] == "read-only" and "review" not in a, a
 
 
+@case("codex final message is recovered from the JSON stream when -o is not written")
+def _():
+    jid = start("task", "-t", "codex", "NO_OUT_FILE")
+    r = run("wait", jid, "--timeout", "30", check=0)
+    assert job(jid)["status"] == "succeeded", job(jid)
+    assert "fake codex answer" in r.stdout, r.stdout
+
+
+@case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
+def _():
+    saved = xh.IS_WIN
+    xh.IS_WIN = True
+    try:
+        out = TMP / "jobdir" / "result.md"
+        out.parent.mkdir()
+        cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x1"}, "result", out)
+        assert scratch and cli_out.parent == scratch and Path(tempfile.gettempdir()) in scratch.parents, cli_out
+        cli_out.write_text("answer")
+        xh.collect_output(cli_out, out, scratch)
+        assert out.read_text() == "answer" and not scratch.exists()
+        same, none = xh.codex_output_path({"target": "claude", "id": "x2"}, "result", out)
+        assert same == out and none is None
+    finally:
+        xh.IS_WIN = saved
+
+
 @case("no job holds the repo after completion")
 def _():
     run("status", check=0)

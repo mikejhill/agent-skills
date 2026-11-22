@@ -28,6 +28,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -745,11 +746,41 @@ def _linux_pdeathsig():
 # ---------------------------------------------------------------------- supervisor
 
 
+def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
+    """Where Codex writes its final message (-o): (path, scratch dir to remove or None).
+
+    Codex 0.170+ opens the -o file with a strict no-follow open on Windows and has been
+    seen to reject paths under %LOCALAPPDATA%\\cross-harness with "path contains a
+    reparse point" although no component is a reparse point, while paths under
+    %TEMP% work. So on Windows, Codex writes into a private temp dir and the result
+    is moved into the job dir afterwards. Elsewhere it writes into the job dir.
+    """
+    if job["target"] != "codex" or not IS_WIN:
+        return out_path, None
+    try:
+        scratch = Path(tempfile.mkdtemp(prefix=f"xh-{job['id']}-{prefix}-"))
+    except OSError:
+        return out_path, None
+    return scratch / out_path.name, scratch
+
+
+def collect_output(cli_out: Path, out_path: Path, scratch) -> None:
+    """Move a final message written outside the job dir into it, then drop the scratch dir."""
+    if not scratch:
+        return
+    try:
+        if cli_out.is_file():
+            shutil.copyfile(cli_out, out_path)
+    except OSError:
+        pass
+    shutil.rmtree(scratch, ignore_errors=True)
+
+
 def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_session=None) -> dict:
     """Read one CLI run's output files into result fields."""
     fields = {}
     if target == "codex":
-        session, errors = None, []
+        session, errors, last_message = None, [], None
         try:
             for line in stdout_path.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
@@ -762,6 +793,8 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                 typ = ev.get("type", "")
                 if typ in ("thread.started", "session.created", "session_configured"):
                     session = ev.get("thread_id") or ev.get("session_id") or session
+                elif typ == "item.completed" and (ev.get("item") or {}).get("type") == "agent_message":
+                    last_message = ev["item"].get("text") or last_message
                 elif typ in ("error", "turn.failed"):
                     msg = ev.get("message") or (ev.get("error") or {}).get("message")
                     if msg:
@@ -769,6 +802,12 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
         except OSError:
             pass
         fields["session"] = session or fallback_session
+        # Fallback when Codex streamed a final message but did not write the -o file.
+        if last_message and not (out_path.is_file() and out_path.stat().st_size > 0):
+            try:
+                out_path.write_text(last_message, encoding="utf-8")
+            except OSError:
+                pass
         if errors:
             fields["error"] = errors[-1]
     else:
@@ -833,7 +872,8 @@ def supervise(job_id: str) -> int:
     def run_step(step: str, prompt, prefix: str) -> dict:
         """Run one CLI step to completion. Returns parsed fields plus exit_code."""
         out_path, so_path, se_path = jdir / f"{prefix}.md", jdir / f"{prefix}.stdout.log", jdir / f"{prefix}.stderr.log"
-        argv, stdin_text = build_command(job, step, prompt, out_path)
+        cli_out, scratch = codex_output_path(job, prefix, out_path)
+        argv, stdin_text = build_command(job, step, prompt, cli_out)
         with open(so_path, "wb") as so, open(se_path, "wb") as se:
             child = subprocess.Popen(
                 argv, cwd=job["cwd"], env=child_env(job),
@@ -858,10 +898,13 @@ def supervise(job_id: str) -> int:
             except Stop as e:
                 # Record first: on Windows, terminating the job ends this process too.
                 update_job(job_id, status=e.status, reason=e.reason, ended=now_iso())
+                if scratch:
+                    shutil.rmtree(scratch, ignore_errors=True)
                 cont.terminate(child)
                 raise
         if not IS_WIN:
             cont.reap(child)  # end stragglers between steps (Windows: at job end)
+        collect_output(cli_out, out_path, scratch)
         fields = parse_outputs(job["target"], so_path, out_path, job.get("resume_session"))
         fields["exit_code"] = child.returncode
         has = out_path.is_file() and out_path.stat().st_size > 0

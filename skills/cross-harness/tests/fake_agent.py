@@ -48,6 +48,10 @@ answer = f"fake {flavor} answer; args={' '.join(a for a in argv if not a.startsw
 if flavor == "codex":
     out = argv[argv.index("-o") + 1]
     print(json.dumps({"type": "thread.started", "thread_id": session}), flush=True)
+    if "NO_OUT_FILE" in prompt:  # like Codex refusing the -o path: answer only in the stream
+        print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": answer}}), flush=True)
+        print(json.dumps({"type": "turn.completed"}), flush=True)
+        sys.exit(0)
     print(json.dumps({"type": "turn.completed"}), flush=True)
     with open(out, "w") as f:
         f.write(answer)
