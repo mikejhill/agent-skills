@@ -22,7 +22,7 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 | Workflow | File | Trigger | Job |
 | --- | --- | --- | --- |
 | CI | `ci.yml` | `push` to default branch, `pull_request`, `merge_group` | Validate. Never publishes. |
-| Release | `release.yml` | Automatic: `workflow_run` after CI succeeds on the default branch. `workflow_dispatch` only to force a patch on a CI-verified commit | Version, tag, release, publish |
+| Release | `release.yml` | Automatic: `workflow_run` after CI succeeds on a default-branch push. No manual trigger | Version, tag, release, publish |
 | Deploy (optional) | `deploy.yml` | `release` or `workflow_dispatch` | Promote a release to an environment |
 
 ## CI rules

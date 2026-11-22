@@ -34,11 +34,11 @@ Commands for Bash and PowerShell are in [commands.md](references/commands.md).
 
 | Condition | Strategy |
 | --- | --- |
+| Speculative or experimental | Report the branch name only. Never push or merge |
 | The user asked for a PR | Push the branch and open a PR |
 | Changes need human review first | Push and report the branch name |
 | Several branches touch overlapping files | Merge one at a time; stop on conflict and report the files and branches |
 | Independent, low-risk changes | `git merge --no-ff <branch>` from the main tree |
-| Speculative or experimental | Report the branch name only |
 
 Never auto-resolve merge conflicts; the user decides. After a merge, check `git status --short`. Run any further verification in a new worktree, not the main tree.
 

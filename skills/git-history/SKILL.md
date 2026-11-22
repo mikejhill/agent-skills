@@ -26,8 +26,28 @@ Change existing commits with predictable, non-interactive commands, and confirm 
 - Never open an editor. Interactive editors are unavailable to agents. Set `GIT_SEQUENCE_EDITOR` and edit the todo file directly ([rebase-editor.md](references/rebase-editor.md)). Never use `--edit-todo`.
 - Use `--autostash` on rebases when the working tree is dirty.
 - New or reworded messages follow the repository's commit conventions.
-- If the commits were already pushed, before rewriting: `git fetch`, confirm `git merge-base --is-ancestor origin/<branch> HEAD` (pull first if not), and record `origin/<branch>`'s SHA. After the rewrite, explain that a force-push is needed and collaborators must reset. Get the user's explicit yes, then push with `git push --force-with-lease=<branch>:<recorded-sha>`, never `--force`. A bare `--force-with-lease` compares against the remote-tracking ref, which a background fetch can update.
+- If the commits were already pushed, follow *Force-push* below. Never use `--force` or a bare `--force-with-lease`, which trusts a remote-tracking ref that a background fetch can move.
 - If anything goes wrong mid-rebase, `git rebase --abort` restores the original state.
+
+## Force-push
+
+Before rewriting, pin the remote tip once and reuse that exact SHA:
+
+```bash
+dest=$(git rev-parse --abbrev-ref --symbolic-full-name '@{push}')   # e.g. origin/feature
+remote=${dest%%/*}; branch=${dest#*/}
+git fetch "$remote" "refs/heads/$branch"
+lease=$(git rev-parse FETCH_HEAD)
+git merge-base --is-ancestor "$lease" HEAD || echo "remote has commits HEAD lacks: integrate them first"
+```
+
+After the rewrite, explain that a force-push is needed and collaborators must reset. With the user's explicit yes:
+
+```bash
+git push --force-with-lease="refs/heads/$branch:$lease" "$remote" "HEAD:refs/heads/$branch"
+```
+
+If `@{push}` is unset, ask which remote and branch the commits were pushed to. A remote name containing `/` needs the parts set by hand.
 
 ## Fixup and autosquash
 

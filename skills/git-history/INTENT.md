@@ -25,3 +25,4 @@ Let agents rewrite git history (fixups, interactive rebases, amends) reliably wi
 - 2026-11-22: [agent] Tested the sequence-editor flow in a scratch repository. `reword` opens `GIT_EDITOR` rather than stopping, so the skill rewords through `edit` plus `git commit --amend -m`. The old skill's claim that the todo file still starts with `break` after the stop was wrong.
 - 2026-11-22: [agent] Codex review fixes on the migration: restored confirmation before every rebase; force-push lease pinned to the reviewed remote SHA.
 - 2026-11-22: [agent] Second Codex review fixes: the force-push lease SHA is recorded before rewriting, after confirming the remote tip is in local history.
+- 2026-11-22: [agent] Third Codex review fixes: Force-push section pins the lease once from the `@{push}` destination (fetch, rev-parse FETCH_HEAD, ancestry check, push the same ref).

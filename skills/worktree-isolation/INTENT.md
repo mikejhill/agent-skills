@@ -24,3 +24,4 @@ Execute agent work in isolated git worktrees so that parallel tasks, subagent op
 - 2026-11-22: [agent] Migrated to the `skill-development` standard. `SKILL.md` cut from 353 to about 70 lines; commands and the parallel pattern moved to `references/`. The base path is kept, although the standard's table has no slot for persistent data, because worktrees hold uncommitted work that is neither temp nor rebuildable cache, and moving it would orphan existing worktrees. Fixed the suffix recipe (the old Bash one produced 8 non-random characters and needed `xxd`), and made subagent dispatch wording harness-neutral.
 - 2026-11-22: [agent] Codex review fixes on the migration: push-for-PR and direct merge are separate alternatives, never run together.
 - 2026-11-22: [agent] Second Codex review fixes: speculative work runs neither push nor merge.
+- 2026-11-22: [agent] Third Codex review fixes: speculative work is the first strategy row, so no later row can authorize a merge.
