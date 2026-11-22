@@ -1,6 +1,10 @@
 ---
 name: browser-control
-description: Take control of the user's own running browser (Chrome, Edge, Brave) to do tasks in it with their real tabs, logins and sessions. Use whenever a task needs the user's browser - reading or extracting from pages they are signed in to, navigating, clicking, filling forms, running multi-step web workflows, pulling an app's JSON data, taking screenshots or PDFs - and for inspection work such as cookies, storage, network or console capture, and device emulation.
+description: >-
+  Control the user's own running Chrome, Edge, or Brave, with their real tabs
+  and logins: navigate, read, extract, click, fill forms, run multi-step web
+  tasks, capture screenshots or PDFs, and inspect cookies, network, or console.
+  Use whenever a task needs the user's browser.
 ---
 
 # Browser control

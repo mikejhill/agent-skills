@@ -23,6 +23,15 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
 7. Thin over the CLIs: `codex exec` and `codex exec review`, `claude -p`. Pass models,
    efforts, and extra flags through unchanged, so CLI updates don't break the skill.
 
+## Requirements
+
+- A skill, not a plugin, replacing the Codex plugin for Claude Code, whose detached broker processes leaked and locked worktree folders on Windows.
+- Neutral description: used only when the user or their instructions ask for the other agent.
+- Reviews use each harness's native review tool by default (Codex `codex exec review`, Claude `/code-review` through `claude -p`), with arguments passed through verbatim; fixes allowed with `--fix`.
+- Posting review results to GitHub or GitLab (`--post`) is a common feature for every target.
+- Document that the benefit of cross-model review is unproven.
+- No process outlives its job, on Windows and POSIX.
+
 ## Design decisions
 
 - **No broker or daemon.** One CLI process per job. That rules out the largest class
@@ -106,3 +115,4 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
 - 2026-11-18: [agent] Windows retest at e7fb80d: smoke test 17/17 three times; live Claude
   native review (`/code-review low feat`) and Codex native review with `--fix` (fix step ran
   and reported; review found nothing to change).
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: README added, `compatibility` set (the skill only works between Claude Code and Codex), and a Requirements section added from the operator's recorded decisions. No changes to the body or script. Known deviation: job state lives in `<state-home>/cross-harness/` rather than under an `agent-skills/` parent; moving it would strand running jobs.

@@ -1,6 +1,10 @@
 ---
 name: efficient-tool-calls
-description: Cut the fixed cost of agent tool calls on multi-step work (browser automation, CLI sequences, scripting loops) by batching predictable steps, keeping commands short, bounding output, and choosing the shell measured fastest on this machine. Use when a task will take many shell or tool calls, or when both a POSIX shell and PowerShell are available.
+description: >-
+  Cut the fixed cost of agent tool calls on multi-step work: batch predictable
+  steps, keep commands short, bound output, and use the shell measured fastest
+  on this machine. Use when a task will take many shell or tool calls, or both
+  a POSIX shell and PowerShell are available.
 ---
 
 # Efficient tool calls

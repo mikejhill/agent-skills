@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 IS_WINDOWS = os.name == "nt"
+SKILL = "session-handoff"
 
 
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
@@ -82,23 +83,32 @@ def _check_root(value: str) -> Path:
 def _handoff_dir(root: Path) -> Path:
     """Create or verify the private handoff directory inside a checked root.
 
+    Windows: <root>\\agent-skills\\session-handoff. Unix:
+    <root>/agent-skills-<uid>/session-handoff, both levels 0700 and owned by us.
     Raises Unusable when the root denies creation (try the next root) and
     SystemExit when an existing entry fails a privacy check (fail closed).
     """
     if IS_WINDOWS:
-        directory = root / "agent-handoffs"
-        try:
-            directory.mkdir(exist_ok=True)
-        except OSError as exc:
-            if not _is_write_failure(exc):
-                raise
-            raise Unusable(f"cannot create {directory}: {exc}") from exc
-        if _is_link_or_junction(directory) or not directory.is_dir():
-            raise SystemExit(f"error: {directory} is a link, junction, or not a directory")
+        directory = root
+        for part in ("agent-skills", SKILL):
+            directory = directory / part
+            try:
+                directory.mkdir(exist_ok=True)
+            except OSError as exc:
+                if not _is_write_failure(exc):
+                    raise
+                raise Unusable(f"cannot create {directory}: {exc}") from exc
+            if _is_link_or_junction(directory) or not directory.is_dir():
+                raise SystemExit(f"error: {directory} is a link, junction, or not a directory")
         return directory
 
     uid = os.getuid()
-    directory = root / f"agent-handoffs-{uid}"
+    parent = _private_unix_dir(root / f"agent-skills-{uid}", uid)
+    return _private_unix_dir(parent / SKILL, uid)
+
+
+def _private_unix_dir(directory: Path, uid: int) -> Path:
+    """mkdir 0700, then require a real directory owned by uid; tighten its mode."""
     try:
         directory.mkdir(mode=0o700)
     except FileExistsError:
