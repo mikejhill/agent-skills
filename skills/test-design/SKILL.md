@@ -9,7 +9,7 @@ description: >-
 
 # Test design
 
-Write tests that each prove one behavior and, on failure, say exactly what broke. Language skills (such as `python-development`) supply frameworks and commands. This skill supplies the design rules.
+Write tests that each prove one behavior and, on failure, say exactly what broke. Frameworks and commands come from whatever language standards the user has. This skill supplies the design rules.
 
 ## Workflow
 

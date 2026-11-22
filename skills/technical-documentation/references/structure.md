@@ -6,7 +6,7 @@ Create only when needed. Their meanings are fixed; profiles choose the exact tre
 
 | Directory | Holds |
 | --- | --- |
-| `decisions/` | Decision rationale and lifecycle records (see `architecture-decisions`) |
+| `decisions/` | Decision rationale and lifecycle records (ADRs) |
 | `architecture/` | Current system structure and relationships |
 | `guides/` | Task-oriented usage and learning |
 | `reference/` | Authoritative lookup material and contracts |

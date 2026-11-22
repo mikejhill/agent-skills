@@ -21,7 +21,7 @@ Record why a decision was made: the forces, the real alternatives, and the trade
 - Every rejected option has a reason tied to a driver. The outcome traces back to the drivers.
 - Consequences name at least one good and one bad effect, each with a mechanism or metric. No "improves maintainability".
 - Post-hoc ADRs reconstruct the real reasoning from history. If no formal evaluation happened, say so. Never invent rationale or list people who were not involved.
-- Metadata follows the `technical-documentation` schema: decision statuses, evidence-based review, and no timestamp fields. Keep historical dates as sourced text in Context, and preserve existing records.
+- Metadata uses the frontmatter in [adr-template.md](references/adr-template.md), adjusted to any documentation metadata standard the user has: decision statuses, evidence-based review, and no timestamp fields. Keep historical dates as sourced text in Context, and preserve existing records.
 - Accepted content is immutable. Only lifecycle metadata (`status`, `superseded_by`) changes; a changed decision gets a new superseding ADR.
 - Use the template in [adr-template.md](references/adr-template.md): the full one by default, the minimal one for low-impact decisions.
 

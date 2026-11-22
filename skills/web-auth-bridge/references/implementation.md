@@ -1,6 +1,6 @@
 # Implementation guide
 
-`config_root()` and `user_cache()` stand for the standard config and cache locations from the `skill-development` skill (`references/paths.md`): `${XDG_CONFIG_HOME:-~/.config}/agent-skills/<skill>/` and `<user-cache>/agent-skills/<skill>/`.
+`config_root()` and `user_cache()` stand for the standard config and cache locations: `${XDG_CONFIG_HOME:-~/.config}/agent-skills/<skill>/` and `<user-cache>/agent-skills/<skill>/`.
 
 ## Step 1: Implement AuthCallback
 

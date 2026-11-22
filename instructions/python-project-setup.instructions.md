@@ -6,7 +6,7 @@ applyTo: "**/*.py,**/pyproject.toml,**/uv.lock,**/.python-version"
 
 # Python project setup profile
 
-This scoped profile extends project-setup. Use python-development for implementation details. Shared folder and documentation conventions live in project-setup and technical-documentation.
+This scoped profile adds Python specifics to any general project-setup standards in use. Implementation details and shared folder and documentation conventions come from the user's other standards, if any.
 
 - **Build tool**: `uv` (always). No exceptions except throwaway scripts.
 - **Required**: `pyproject.toml`, `.python-version`, `uv.lock` (committed)
