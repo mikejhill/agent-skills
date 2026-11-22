@@ -87,7 +87,8 @@ def find_exe(name, skip=None, exact=False):
     # If the workspace is home or a drive root (a dotfiles repo, or run from ~), "under it"
     # would cover user installs such as ~/.local/bin: only skip the directory itself.
     home = _norm(os.path.expanduser("~"))
-    broad = _under(home, root)
+    # Also a filesystem root (e.g. D:\ when home is on C:): it holds installed tools too.
+    broad = _under(home, root) or os.path.dirname(root) == root
     cwd = _norm(os.getcwd())
     cwd_tree = not _under(home, cwd)  # below home: the current subtree is still the workspace
 
@@ -233,12 +234,12 @@ def run_once(argv, kw, limit=30):
         except OSError:
             pass
     killer = threading.Timer(limit, kill_tree)
-    killer.start()
-    try:
+    try:  # cleanup is armed from here, even if the watchdog thread can't start
+        killer.start()
         _raise_pending()
         code = p.wait()
         dt = time.perf_counter() - t
-    except BaseException:  # Ctrl+C: don't leave the sample's process group behind
+    except BaseException:  # Ctrl+C, or no watchdog: don't leave the sample's process group behind
         kill_tree()
         p.wait()
         raise
@@ -347,9 +348,11 @@ def valid_cache(c, runs, profiles=False):
         return None
     if not isinstance(c.get("runs"), int) or c["runs"] < runs:  # fewer samples than asked for
         return None
+    def ms(x):  # finite and non-negative (json reads 1e999 as infinity)
+        return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x >= 0
     for v in shells.values():
-        if not (isinstance(v, dict) and isinstance(v.get("median_ms"), (int, float))
-                and isinstance(v.get("p90_ms"), (int, float)) and isinstance(v.get("family"), str)):
+        if not (isinstance(v, dict) and ms(v.get("median_ms")) and ms(v.get("p90_ms"))
+                and isinstance(v.get("family"), str)):
             return None
     failed = c.get("failed", [])
     if not (isinstance(failed, list) and all(isinstance(f, str) for f in failed)):

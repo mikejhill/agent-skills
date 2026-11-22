@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -457,6 +458,25 @@ class Cache(unittest.TestCase):
         r = json.loads(out.getvalue())
         self.assertIn("failed to start", r["recommendation"])
         self.assertEqual(sorted(r["failed"]), ["bash", "pwsh"])
+
+    def test_nonfinite_timing_is_a_miss(self):
+        good = self.run_probe()
+        bad = json.loads(json.dumps(good))
+        bad["shells"]["bash"]["median_ms"] = float("inf")
+        self.write_cache(bad)
+        self.assertFalse(self.run_probe()["cached"])
+
+    def test_watchdog_failure_still_reaps_sample(self):
+        orig = threading.Timer.start
+        def boom(self_):
+            raise RuntimeError("can't start new thread")
+        threading.Timer.start = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                sp.run_once([sys.executable, "-c", "import time; time.sleep(30)"],
+                            {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL})
+        finally:
+            threading.Timer.start = orig
 
     def test_failed_refresh_drops_old_success(self):
         self.run_probe()

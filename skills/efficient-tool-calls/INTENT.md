@@ -41,3 +41,7 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   zsh -f); `--profiles` has its own cache record; exit 1 when every shell found fails to start.
 - 2026-11-22: [agent] Ninth Astra review: baseline bash gets --norc; SKILL.md promises only to skip user
   startup files; an all-failed refresh deletes the older cached success.
+- 2026-11-22: [agent] Tenth Astra review: sample is reaped if the watchdog can't start; drive roots
+  count as broad (installed tools on D:\); cached timings must be finite; `set -e`-safe log
+  example; manual fallback checks executables exist. Merged after this round (no P1 for six
+  rounds; remaining findings were narrow).

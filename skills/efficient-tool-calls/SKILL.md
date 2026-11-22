@@ -26,7 +26,8 @@ minutes. Spend fewer, better calls.
    In a chain, a pipe reports the filter's status, not the command's: `build | head &&
    next` runs `next` after a failed build, and `head` can cut a producer short. For steps
    whose success matters, use the tool's own limit flag, or save the output and filter it
-   afterwards (`build > out.log 2>&1; s=$?; tail -n 40 out.log; test $s -eq 0 && next`).
+   afterwards (`build > out.log 2>&1 && s=0 || s=$?; tail -n 40 out.log; test $s -eq 0 && next`;
+   the `&& ||` form keeps working under `set -e`).
    `set -o pipefail` fixes the status but not the early stop; use it only with filters
    that read the whole stream.
 4. **Don't discard output you need.** Many tools report timeouts, warnings, and partial
@@ -93,7 +94,7 @@ Then:
 | Your harness starts shells another way (login bash, PowerShell with profile) | Re-run with `--profiles` and compare the matching entries (`bash (login)`, `pwsh (profile)`), with the same 150 ms threshold. It runs your startup scripts several times, including anything they start |
 | One shell is faster by 150 ms or more | Use it for general command-line work: `git`, `python`, build and test tools, file reads |
 | Work only one shell does well | Use that shell regardless: cmdlets, the registry, .NET and CIM objects in PowerShell; pipes through `grep`/`sed`/`awk` in a POSIX shell |
-| Python is not available | Time one empty call per shell by hand and apply the same rule. POSIX: `time bash -c true`. Windows (bare `bash` may be the WSL launcher, so name Git Bash): `Measure-Command { & "$env:ProgramFiles\Git\bin\bash.exe" -c true }` and `Measure-Command { pwsh -NoProfile -c exit }` |
+| Python is not available | Time one empty call per shell by hand and apply the same rule. POSIX: `time bash -c true`. Windows (bare `bash` may be the WSL launcher, so name Git Bash): `Measure-Command { & "$env:ProgramFiles\Git\bin\bash.exe" -c true }` and `Measure-Command { pwsh -NoProfile -c exit }` (`powershell` if there is no `pwsh`). Check each executable exists first (`Test-Path`, `Get-Command`): `Measure-Command` also times a failed lookup |
 
 The probe measures bare shell startup. A harness adds its own time per call, and it can
 differ per shell (one launches PowerShell through an extra `cmd.exe` hop, ~85 ms; another
