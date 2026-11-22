@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DavidAnson/markdownlint-cli2-action@v25
+
+  skills:
+    name: Skill format (skills-ref + skill-development)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/ci/requirements.txt
+      - run: pip install -r .github/ci/requirements.txt
+      - name: skills-ref validate
+        run: python .github/ci/skills_ref_check.py
+      - name: skill-development checker
+        run: python skills/skill-development/scripts/check_skill.py skills
+
+  lint:
+    name: Code lint (ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/ci/requirements.txt
+      - run: pip install -r .github/ci/requirements.txt
+      - name: Lint (same script as the README's local recipe)
+        env:
+          RUFF_FORMAT: github
+        run: .github/ci/lint.sh
+
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # setup-python has no 3.9 build for the newest Ubuntu image.
+          - { os: ubuntu-24.04, python: "3.9" }
+          - { os: ubuntu-latest, python: "3.x" }
+          - { os: windows-latest, python: "3.x" }
+          - { os: macos-latest, python: "3.x" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: .github/ci/requirements-test.txt
+      - run: pip install -r .github/ci/requirements-test.txt
+      - name: pytest (skill unit tests and script smoke tests)
+        run: python -m pytest --junit-xml=junit.xml
+      - name: Publish test report
+        # Fork PRs get a read-only token, so they cannot create the check run.
+        if: ${{ !cancelled() && hashFiles('junit.xml') != '' && !github.event.pull_request.head.repo.fork }}
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: junit.xml
+          check_name: Test report (${{ matrix.os }}, Python ${{ matrix.python }})
+          include_passed: true
+          detailed_summary: true
+          require_tests: true
+
+  ci-pass:
+    name: ci-pass
+    if: always()
+    needs: [markdown, skills, lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::A required job ended with '$r'"; exit 1 ;;
+            esac
+          done

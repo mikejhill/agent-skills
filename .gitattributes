@@ -1,0 +1,3 @@
+# Keep LF in every checkout so linters (yamllint new-lines, shellcheck) and byte
+# comparisons behave the same on Windows as in CI.
+* text=auto eol=lf

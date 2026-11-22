@@ -1,0 +1,13 @@
+# Lint the Python scripts that skills ship. The rule set targets real defects
+# (syntax errors, undefined names, unused code, bug-prone patterns), not style.
+target-version = "py39"
+line-length = 120
+
+[lint]
+select = [
+    "E9",  # syntax and I/O errors
+    "F",   # pyflakes: undefined names, unused imports and variables
+    "B",   # flake8-bugbear: likely bugs
+    "PLE", # pylint errors
+    "W6",  # invalid escape sequences
+]

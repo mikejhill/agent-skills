@@ -41,7 +41,7 @@ customElements.define('app-shell', Shell);
 # Settle fixtures. /beacon: a third-party (localhost vs 127.0.0.1) fetch and a first-party
 # image every 200 ms forever, like analytics and lazy images on retail sites. /chain: four
 # first-party fetches of 250 ms, 150 ms apart (400 ms start to start), then "Chain done".
-# /late: "Late text" appears after 800 ms while the beacons keep firing.
+# /late: "Late text" appears after 2 s (well after the separate wait process starts) while the beacons keep firing.
 BEACON = """<script>let n = 0; setInterval(() => { n++;
   fetch('http://localhost:' + location.port + '/b?' + n, {mode: 'no-cors'}).catch(() => {});
   new Image().src = '/px?' + n; }, 200);</script>"""
@@ -60,7 +60,7 @@ EXTRA = {
         '<span class="tag">new</span><span class="tag">sale</span></div>'
         % (i, i, i, '<b class=price>$%d.00</b>' % (i * 3) if i % 3 else '') for i in range(1, 7)),
     "/late": "<!doctype html><title>Late</title><h1>Late</h1><script>setTimeout(() => "
-             "document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>'), 800)</script>" + BEACON,
+             "(window.lateAt = Date.now(), document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>')), 2000)</script>" + BEACON,
 }
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a): pass
@@ -79,4 +79,10 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             body=PAGE.encode(); ct='text/html'
         self.send_response(200); self.send_header('Content-Type',ct); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
-http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+class Server(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind resolves socket.getfqdn(host), which can stall for tens of
+        # seconds where reverse DNS is slow (macOS CI runners). The name is unused here.
+        http.server.socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+Server(('127.0.0.1', int(sys.argv[1])), H).serve_forever()

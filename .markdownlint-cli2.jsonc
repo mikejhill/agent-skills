@@ -4,7 +4,7 @@
 
     // Limit linting to the repository Markdown content we care about.
     "globs": [
-        "README.md",
+        "*.md",
         "agents/**/*.md",
         "instructions/**/*.md",
         "prompts/**/*.md",

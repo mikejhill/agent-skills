@@ -512,7 +512,7 @@ class WebSocket:
         self._frame(0x1, text.encode("utf-8"))
 
     def recv(self):
-        parts, op0 = [], None
+        parts = []
         while True:
             b0, b1 = self._read(2)
             fin, op, n = b0 & 0x80, b0 & 0x0F, b1 & 0x7F
@@ -534,8 +534,6 @@ class WebSocket:
                 self._frame(0xA, data); continue
             if op == 0xA:
                 continue
-            if op in (0x1, 0x2):
-                op0 = op
             parts.append(data)
             if fin:
                 return b"".join(parts).decode("utf-8", errors="replace")
@@ -1132,7 +1130,7 @@ def rpc(req, state=None, timeout=None):
     try:
         s = socket.create_connection(("127.0.0.1", state["port"]), timeout=5)
     except OSError:
-        raise CLIError("broker not reachable (stale state file?)")
+        raise CLIError("broker not reachable (stale state file?)") from None
     with s:
         s.settimeout(timeout)
         f = s.makefile("rwb")

@@ -85,15 +85,19 @@ def main():
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
     r = Runner(cdp, env)
     try:
-        end = time.time() + 20
-        while True:
-            try:
-                urllib.request.urlopen("http://127.0.0.1:%d/json/version" % cdp, timeout=1).close()
-                break
-            except OSError:
-                if time.time() > end:
-                    sys.exit("browser did not open its debug port: %s" % chrome)
-                time.sleep(0.2)
+        # Wait for both the browser's debug port and the fixture server: on a slow machine the
+        # first page otherwise loads before the fixture server listens.
+        for url, what in (("http://127.0.0.1:%d/json/version" % cdp, "browser did not open its debug port: %s" % chrome),
+                          ("http://127.0.0.1:%d/" % web, "fixture server did not start")):
+            end = time.time() + 20
+            while True:
+                try:
+                    urllib.request.urlopen(url, timeout=1).close()
+                    break
+                except OSError:
+                    if time.time() > end:
+                        sys.exit(what)
+                    time.sleep(0.2)
         print("browser:", chrome)
         code, o, e = r.cli("start", "--idle", "120")
         r.check("start", code == 0 and '"connected"' in o, e)
@@ -219,11 +223,19 @@ def main():
         r.check("--settle-max caps settling with ok + busy report", res.get("settle") == "capped"
                 and res.get("busy") and "Chain done" not in res.get("text", "") and "warning:" in e, o + e)
         code, o, e = r.cli("nav", base + "late", "-t", tid, "--no-wait")
-        t0 = time.time()
         code, o, e = r.cli("wait", "-t", tid, "--for-text", "Late text")
+        done = time.time()
         res = json.loads(o) if code == 0 else {}
+        # The fixture stamps window.lateAt (epoch ms) when it inserts the text. Measure from that
+        # event to the CLI's return; the 0.5 s budget is the 0.3 s poll target plus process exit.
+        _, at, _ = r.cli("eval", "window.lateAt", "-t", tid)
+        try:
+            latency = done - float(json.loads(at)) / 1000
+        except (TypeError, ValueError):  # no stamp: the text never appeared
+            latency = float("nan")
         r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
-                0.6 < res.get("waited", 0) < 1.1 and "settle" not in res, o + e)
+                res.get("waited", 0) > 0.2 and 0 <= latency < 0.5 and "settle" not in res,
+                "latency %.2f s; " % latency + o + e)
         # change summary and text --changed
         code, o, e = r.cli("nav", base + "long", "-t", tid)
         res = json.loads(o) if code == 0 else {}

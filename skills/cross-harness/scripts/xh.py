@@ -124,7 +124,7 @@ def jobs_dir() -> Path:
             f"cannot write the state home {d} ({e.strerror or e}). If you are inside a "
             "sandbox (for example Codex workspace-write), rerun this command with "
             f"escalated permissions, or set {HOME_ENV} to a writable directory."
-        )
+        ) from e
     _JOBS_DIR = d
     return d
 
