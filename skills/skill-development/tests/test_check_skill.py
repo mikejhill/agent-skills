@@ -139,8 +139,20 @@ class CheckSkillTest(unittest.TestCase):
         d = make_skill(self.root, "s", "name: s\ndescription: D.\n",
                        body="Follow the `other-skill` skill for style.\n\n```\nother-skill skill\n```\n")
         self.assertTrue(any(l == "warning" and "'other-skill'" in m for l, m in levels(d)))
-        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow any standards the user has for style.\n", encoding="utf-8")
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow any standards the user has for style.\n\n```\nother-skill skill `other-skill`\n```\n", encoding="utf-8")
         self.assertEqual(levels(d), [])
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollowing `other-skill` for frameworks.\n", encoding="utf-8")
+        self.assertTrue(any("'other-skill'" in m for _, m in levels(d)))
+
+    def test_coupling_instruction_names(self) -> None:
+        (self.root / "instructions").mkdir()
+        (self.root / "instructions" / "general.instructions.md").write_text("# g\n", encoding="utf-8")
+        skills = self.root / "skills"
+        skills.mkdir()
+        d = make_skill(skills, "s", "name: s\ndescription: D.\n", body="Follow the user's general instructions.\n")
+        self.assertEqual(levels(d), [])
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nSee general.instructions.md.\n", encoding="utf-8")
+        self.assertTrue(any("'general'" in m for _, m in levels(d)))
 
     def test_main_exit_codes(self) -> None:
         make_skill(self.root, "ok", "name: ok\ndescription: D.\n")

@@ -347,8 +347,13 @@ class Checker:
             prose = strip_code_blocks(text)
             for kind, name in names:
                 n = re.escape(name)
-                pattern = rf"`?\b{n}\b`?(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+`?\b{n}\b`?|`{n}`\s*\("
-                if re.search(pattern, prose, re.I):
+                # Unambiguous references only: the name in inline code, an instruction
+                # filename, or a hyphenated name next to its type. Plain words such as
+                # "general" are ordinary prose.
+                pattern = rf"`{n}(?:\.instructions\.md)?`|\b{n}\.instructions\.md\b"
+                if "-" in name:
+                    pattern += rf"|\b{n}\b(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+\b{n}\b"
+                if re.search(pattern, prose):
                     where = doc.relative_to(self.root).as_posix()
                     self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
 

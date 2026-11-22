@@ -45,7 +45,7 @@ Start from the templates in [assets/](assets/).
 ## Naming
 
 - Follow the spec: 1 to 64 characters, lowercase letters, digits, and single hyphens. The name must equal the folder name.
-- Use a noun phrase for a skill that covers a subject: `python-development`, `project-setup`, `mermaid-diagrams`.
+- Use a noun phrase for a skill that covers a subject: `go-development`, `release-process`, `api-design`.
 - Use verb-object only for a skill that performs one explicit action: `deploy-preview`, `rotate-keys`.
 - Do not use gerunds: `managing-secrets` becomes `secret-management`, `writing-ai-instructions` became `skill-development`.
 - Keep it to two or three words. Drop filler such as `helper`, `utils`, `tool`, or `my`.
@@ -129,7 +129,7 @@ Read [scripts.md](references/scripts.md) before writing or changing a script, an
 ## Checklist
 
 - [ ] `python3 "<skill-dir>/scripts/check_skill.py" <target-skill-folder>` passes with no errors. It checks the name, frontmatter, sizes, required files, links, gerunds, and references to sibling skills.
-- [ ] Nothing names another skill or instruction file, and no rule belongs to a different subject.
+- [ ] No other skill or instruction file is named as a dependency or source of rules, and no rule belongs to a different subject.
 - [ ] `npx markdownlint-cli2` passes for the skill's Markdown, if the repository uses it.
 - [ ] Description test: five requests, including near-misses, are judged correctly from the description alone.
 - [ ] One realistic task run follows the skill without loading references it did not need.
