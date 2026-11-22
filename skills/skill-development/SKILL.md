@@ -13,7 +13,7 @@ Build skills that trigger accurately, load little, and run in any harness. This 
 
 ## Workflow
 
-1. **Intent first.** For a new skill, write `INTENT.md` from the user's ask before anything else, keeping their words for goals and requirements. For an existing skill, read `INTENT.md` first, then append a log entry after changing it. If it has none, a review only reports that it is missing. A revision adds one, built from the user's stated asks and the skill's history, with anything inferred marked `[agent]`. See [readme-and-intent.md](references/readme-and-intent.md).
+1. **Intent first.** For a new skill, write `INTENT.md` from the user's ask before anything else, keeping their words for goals and requirements. If an `INTENT.md` already exists, build from it and leave it unedited. For an existing skill, read `INTENT.md` first, then append a log entry after changing it. If it has none, a review only reports that it is missing. A revision adds one, built from the user's stated asks and the skill's history, with anything inferred marked `[agent]`. See [readme-and-intent.md](references/readme-and-intent.md).
 2. **Name** the skill ([Naming](#naming)).
 3. **Write frontmatter** ([Metadata](#metadata)). Write the description last, once the body is settled.
 4. **Write `SKILL.md`**: the core path only. Move everything else into `references/` ([Progressive disclosure](#progressive-disclosure)).

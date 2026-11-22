@@ -42,7 +42,7 @@ def split_frontmatter(text: str) -> tuple[str | None, str | None]:
     if not lines or lines[0].strip() != "---":
         return None, "SKILL.md does not start with '---' frontmatter"
     for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
+        if lines[i].rstrip() == "---":
             return "\n".join(lines[1:i]), None
     return None, "frontmatter has no closing '---'"
 
@@ -80,8 +80,10 @@ def _plain_scalar(raw: str) -> tuple[object, str | None]:
         return None, None
     if re.fullmatch(r"[-+]?(\d[\d_]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?|0x[0-9a-fA-F]+|0o[0-7]+|[-+]?\.(inf|Inf)|\.(nan|NaN)", value):
         return 0, None  # a number, never a string
-    if value in ("yes", "no", "on", "off", "Yes", "No", "On", "Off", "True", "False", "TRUE", "FALSE"):
+    if value.lower() in ("yes", "no", "on", "off", "y", "n", "true", "false", "null"):
         return None, f"is the ambiguous YAML word '{value}'; quote it or use true/false"
+    if re.match(r"^\d{4}-\d\d?-\d\d?([Tt ]|$)", value):
+        return None, f"looks like a YAML date ('{value}'); quote it"
     return value, None
 
 
@@ -181,7 +183,7 @@ def sidecar_disables_implicit(text: str) -> bool:
         if child_indent is None:
             child_indent = indent
         if indent == child_indent:
-            m = re.fullmatch(r"allow_implicit_invocation:\s*(\S+)\s*(#.*)?", line.strip())
+            m = re.fullmatch(r"allow_implicit_invocation:\s+(\S+)\s*(#.*)?", line.strip())
             if m:
                 if found:
                     return False  # duplicate key: ambiguous
@@ -282,11 +284,15 @@ class Checker:
             self.add("error", "both invocation paths are disabled; the skill is unreachable")
         sidecar = self.root / "agents" / "openai.yaml"
         sidecar_text = self.read(sidecar) if sidecar.is_file() else ""
-        if user_only and not re.search(r"explicitly invoke", self.skill_text, re.I):
+        desc = fields.get("description")
+        body = self.skill_text.split("\n---", 2)[-1] if self.skill_text.startswith("---") else self.skill_text
+        visible = (desc if isinstance(desc, str) else "") + "\n" + strip_code(body)
+        if user_only and not re.search(r"explicitly invoke", visible, re.I):
             self.add("error", "user-only skill must say 'Run only when the user explicitly invokes it' in its description or body")
-        if user_only and not sidecar_disables_implicit(sidecar_text or ""):
-            self.add("error", "user-only skill needs agents/openai.yaml setting policy.allow_implicit_invocation: false")
         compat = fields.get("compatibility")
+        codex_excluded = isinstance(compat, str) and re.search(r"\bonly\b", compat, re.I) and "codex" not in compat.lower()
+        if user_only and not codex_excluded and not sidecar_disables_implicit(sidecar_text or ""):
+            self.add("error", "user-only skill needs agents/openai.yaml setting policy.allow_implicit_invocation: false")
         if isinstance(compat, str) and len(compat) > 500:
             self.add("error", "compatibility exceeds 500 chars")
 
@@ -322,8 +328,10 @@ class Checker:
             for target in LINK_RE.findall(strip_code(text)):
                 if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
                     continue
+                if target.startswith("<") and target.endswith(">"):
+                    target = target[1:-1]
                 path = target.split("#", 1)[0]
-                if path.startswith("<") or "<" in path:
+                if "<" in path:
                     continue
                 where = doc.relative_to(self.root).as_posix()
                 resolved = (doc.parent / path).resolve()
@@ -341,7 +349,10 @@ def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:
         if (p / "SKILL.md").is_file():
             found.append(p)
             continue
-        subs = sorted(d for d in p.iterdir() if (d / "SKILL.md").is_file()) if p.is_dir() else []
+        try:
+            subs = sorted(d for d in p.iterdir() if (d / "SKILL.md").is_file()) if p.is_dir() else []
+        except OSError:
+            subs = []
         if subs:
             found += subs
         else:

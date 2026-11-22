@@ -16,30 +16,17 @@ Choose by lifetime and audience:
 - **Config** honors `XDG_CONFIG_HOME` on every OS, matching `skill-cli-development`. It holds settings and credentials the user creates. Scripts read it. Agents never write credentials. See the `skill-cli-development` skill.
 - **Cache and state** holds data a script can rebuild, such as probe results, broker state, or downloads.
 
-In Python. Do not use `tempfile.gettempdir()`, because it falls back to the working directory:
+System temp root, chosen explicitly. Do not use `tempfile.gettempdir()`, because it falls back to the working directory:
+
+- Candidates: Windows `TEMP`, then `TMP`. Unix `TMPDIR`, then `/tmp`, then `/var/tmp`. Skip relative, missing, or unwritable roots.
+- A root must be private before user-facing files go under it. On Windows it must sit inside `%USERPROFILE%`, whose ACL is owner-only. On Unix it must be owned by you and not group- or other-writable, or be sticky and owned by you or `root`, like `/tmp`.
+- If no root qualifies, stop and report. For a ready implementation, see `session-handoff`'s `scripts/new_handoff.py`.
+
+Cache root in Python:
 
 ```python
-import os, stat, sys
+import os, sys
 from pathlib import Path
-
-def system_temp(skill: str) -> Path:
-    if sys.platform == "win32":
-        roots = [os.environ.get(v) for v in ("TEMP", "TMP")]
-    else:
-        roots = [os.environ.get("TMPDIR"), "/tmp", "/var/tmp"]
-    for root in filter(None, roots):
-        base = Path(root)
-        if not (base.is_absolute() and base.is_dir() and os.access(base, os.W_OK | os.X_OK)):
-            continue
-        if sys.platform == "win32":
-            return base / "agent-skills" / skill
-        parent = base / f"agent-skills-{os.getuid()}"
-        parent.mkdir(mode=0o700, exist_ok=True)
-        st = parent.lstat()
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
-            raise SystemExit(f"unsafe temp directory: {parent}")
-        return parent / skill
-    raise SystemExit("no usable system temp directory")
 
 def env_root(var: str, default: Path) -> Path:
     value = os.environ.get(var, "")
