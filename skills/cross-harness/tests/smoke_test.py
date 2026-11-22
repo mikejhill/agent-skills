@@ -280,7 +280,13 @@ def _():
     jid = start("task", "-t", "codex", "NO_OUT_FILE")
     r = run("wait", jid, "--timeout", "30", check=0)
     assert job(jid)["status"] == "succeeded", job(jid)
-    assert "fake codex answer" in r.stdout, r.stdout
+    assert "fake codex answer" in r.stdout and "progress:" not in r.stdout, r.stdout
+    jid = start("task", "-t", "codex", "NO_OUT_FILE PROGRESS_ONLY")
+    run("wait", jid, "--timeout", "30")
+    j = job(jid)
+    assert j["status"] == "failed", j
+    md = TMP / "home" / "jobs" / jid / "result.md"
+    assert not md.exists() or "progress:" not in md.read_text(), md.read_text()
 
 
 @case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
@@ -297,8 +303,36 @@ def _():
         assert out.read_text() == "answer" and not scratch.exists()
         same, none = xh.codex_output_path({"target": "claude", "id": "x2"}, "result", out)
         assert same == out and none is None
+        # A failed copy leaves no truncated result and reports the error.
+        out.unlink()
+        cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x3"}, "result", out)
+        cli_out.write_text("full answer")
+        real = xh.shutil.copyfile
+
+        def broken(src, dst):
+            Path(dst).write_text("full")
+            raise OSError(28, "No space left on device")
+        xh.shutil.copyfile = broken
+        try:
+            err = xh.collect_output(cli_out, out, scratch)
+        finally:
+            xh.shutil.copyfile = real
+        assert err and not out.exists() and not list(out.parent.glob("*.partial")), err
     finally:
         xh.IS_WIN = saved
+
+
+@case("sweep reclaims temp output dirs left by finished jobs")
+def _():
+    jid = start("task", "-t", "codex", "hello")
+    run("wait", jid, "--timeout", "30", check=0)
+    left = Path(tempfile.mkdtemp(prefix="xh-left-"))
+    p = TMP / "home" / "jobs" / jid / "job.json"
+    j = json.loads(p.read_text())
+    j.update(scratch=[str(left)], ended="2000-01-01T00:00:00+00:00")
+    p.write_text(json.dumps(j))
+    run("status", check=0)
+    assert not left.exists() and not job(jid).get("scratch"), job(jid)
 
 
 @case("no job holds the repo after completion")

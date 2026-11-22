@@ -758,29 +758,41 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     if job["target"] != "codex" or not IS_WIN:
         return out_path, None
     try:
-        scratch = Path(tempfile.mkdtemp(prefix=f"xh-{job['id']}-{prefix}-"))
+        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-"))
     except OSError:
         return out_path, None
     return scratch / out_path.name, scratch
 
 
-def collect_output(cli_out: Path, out_path: Path, scratch) -> None:
-    """Move a final message written outside the job dir into it, then drop the scratch dir."""
+def collect_output(cli_out: Path, out_path: Path, scratch):
+    """Move a final message written outside the job dir into it, then drop the scratch dir.
+
+    The copy goes to a staging file that replaces the destination only once complete,
+    so a failed copy never leaves a truncated result. Returns an error string or None.
+    """
     if not scratch:
-        return
+        return None
+    err = None
+    staging = out_path.with_name(out_path.name + ".partial")
     try:
         if cli_out.is_file():
-            shutil.copyfile(cli_out, out_path)
-    except OSError:
-        pass
+            shutil.copyfile(cli_out, staging)
+            os.replace(staging, out_path)
+    except OSError as e:
+        err = f"could not copy the final message into the job dir: {e}"
+        try:
+            staging.unlink()
+        except OSError:
+            pass
     shutil.rmtree(scratch, ignore_errors=True)
+    return err
 
 
 def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_session=None) -> dict:
     """Read one CLI run's output files into result fields."""
     fields = {}
     if target == "codex":
-        session, errors, last_message = None, [], None
+        session, errors, last_message, final_message = None, [], None, None
         try:
             for line in stdout_path.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
@@ -795,6 +807,8 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                     session = ev.get("thread_id") or ev.get("session_id") or session
                 elif typ == "item.completed" and (ev.get("item") or {}).get("type") == "agent_message":
                     last_message = ev["item"].get("text") or last_message
+                elif typ == "turn.completed":
+                    final_message, last_message = last_message, None
                 elif typ in ("error", "turn.failed"):
                     msg = ev.get("message") or (ev.get("error") or {}).get("message")
                     if msg:
@@ -802,10 +816,11 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
         except OSError:
             pass
         fields["session"] = session or fallback_session
-        # Fallback when Codex streamed a final message but did not write the -o file.
-        if last_message and not (out_path.is_file() and out_path.stat().st_size > 0):
+        # Fallback when Codex completed a turn but did not write the -o file. Only the
+        # last message of a completed turn counts; a trailing progress update does not.
+        if final_message and not errors and not (out_path.is_file() and out_path.stat().st_size > 0):
             try:
-                out_path.write_text(last_message, encoding="utf-8")
+                out_path.write_text(final_message, encoding="utf-8")
             except OSError:
                 pass
         if errors:
@@ -873,6 +888,26 @@ def supervise(job_id: str) -> int:
         """Run one CLI step to completion. Returns parsed fields plus exit_code."""
         out_path, so_path, se_path = jdir / f"{prefix}.md", jdir / f"{prefix}.stdout.log", jdir / f"{prefix}.stderr.log"
         cli_out, scratch = codex_output_path(job, prefix, out_path)
+        if scratch:  # recorded so the lost-job sweep can reclaim it after a forced exit
+            update_job(job_id, scratch=[*(load_job(job_id).get("scratch") or []), str(scratch)])
+        try:
+            fields = _run_step(step, prompt, out_path, so_path, se_path, cli_out)
+        except BaseException:
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
+            raise
+        copy_err = collect_output(cli_out, out_path, scratch)
+        fields.update(parse_outputs(job["target"], so_path, out_path, job.get("resume_session")))
+        has = out_path.is_file() and out_path.stat().st_size > 0
+        if copy_err and not has:
+            fields["error"] = copy_err
+        fields["ok"] = fields["exit_code"] == 0 and has and not fields.get("error")
+        if not fields["ok"] and not fields.get("error"):
+            tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
+            fields["error"] = tail or f"exit code {fields['exit_code']}" + ("" if has else ", no final message")
+        return fields
+
+    def _run_step(step, prompt, out_path, so_path, se_path, cli_out) -> dict:
         argv, stdin_text = build_command(job, step, prompt, cli_out)
         with open(so_path, "wb") as so, open(se_path, "wb") as se:
             child = subprocess.Popen(
@@ -898,21 +933,11 @@ def supervise(job_id: str) -> int:
             except Stop as e:
                 # Record first: on Windows, terminating the job ends this process too.
                 update_job(job_id, status=e.status, reason=e.reason, ended=now_iso())
-                if scratch:
-                    shutil.rmtree(scratch, ignore_errors=True)
                 cont.terminate(child)
                 raise
         if not IS_WIN:
             cont.reap(child)  # end stragglers between steps (Windows: at job end)
-        collect_output(cli_out, out_path, scratch)
-        fields = parse_outputs(job["target"], so_path, out_path, job.get("resume_session"))
-        fields["exit_code"] = child.returncode
-        has = out_path.is_file() and out_path.stat().st_size > 0
-        fields["ok"] = child.returncode == 0 and has and not fields.get("error")
-        if not fields["ok"] and not fields.get("error"):
-            tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
-            fields["error"] = tail or f"exit code {child.returncode}" + ("" if has else ", no final message")
-        return fields
+        return {"exit_code": child.returncode}
 
     final = {}
     claude_native = job["target"] == "claude" and job.get("mode") == "native"
@@ -984,11 +1009,27 @@ def spawn_supervisor(job_id: str) -> int:
 # --------------------------------------------------------------------------- sweep
 
 
+def reclaim_scratch(job: dict) -> None:
+    """Remove a finished job's temp output dirs (Windows Codex runs) that outlived it.
+
+    A cancel, timeout or forced exit can end the supervisor before its own cleanup.
+    """
+    dirs = job.get("scratch") or []
+    if not dirs or time.time() - parse_iso(job.get("ended", "")) < 60:
+        return  # give a just-finished supervisor time to finish its own cleanup and writes
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)
+    left = [d for d in dirs if Path(d).exists()]
+    if left != dirs:
+        update_job(job["id"], scratch=left or None)
+
+
 def sweep(kill: bool = True) -> list:
     """Mark jobs whose supervisor vanished as lost and end leftover trees."""
     changed = []
     for job in all_jobs():
         if job.get("status") not in ACTIVE:
+            reclaim_scratch(job)
             continue
         sup = job.get("supervisor") or {}
         if sup and alive(sup.get("pid"), sup.get("start")):
@@ -1008,6 +1049,7 @@ def sweep(kill: bool = True) -> list:
                 # The group leader may be gone (Linux parent-death signal) while
                 # members it started remain. The group id is the leader's pid.
                 killed = kill_group(ch.get("pid"))
+        reclaim_scratch(job)
         update_job(job["id"], status="lost", ended=now_iso(),
                    reason="supervisor exited without finishing" + ("; ended leftover processes" if killed else ""))
         changed.append(job["id"])
