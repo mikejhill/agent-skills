@@ -346,19 +346,26 @@ class Checker:
             where = doc.relative_to(self.root).as_posix()
             hits: set[tuple[str, str]] = set()
             # Any instruction filename is an explicit dependency, installed or not.
-            for m in re.finditer(r"(?<![\w.-])([a-z0-9]+(?:-[a-z0-9]+)*)\.instructions\.md\b", prose):
-                hits.add(("instruction", m.group(1)))
+            # An instruction file the skill reads or follows (not one it creates), installed or not.
+            for line in text.splitlines():
+                for m in re.finditer(r"(?<![\w.-])([a-z0-9]+(?:-[a-z0-9]+)*)\.instructions\.md\b", line):
+                    before = line[: m.start()]
+                    if re.search(r"\b(?:create|write|generate|add|produce|output)\b", before, re.I):
+                        continue
+                    if re.search(r"\.\.[/\\]|\b(?:follow|see|per|read|load|apply|cat|according to|defined in|from)\b", before, re.I):
+                        hits.add(("instruction", m.group(1)))
             for kind, name in names:
                 e = re.escape(name)
                 bare = rf"(?<![\w.-]){e}(?![\w-]|\.instructions)"
                 # A one-word name ("general") counts only in inline code; a hyphenated one also bare.
                 n = rf"(?:`{e}`|{bare})" if "-" in name else rf"`{e}`"
                 # Paths into a sibling folder break wherever it is absent, even in code blocks.
-                path = rf"(?:^|[\s`'\"(=])(?:\.\./|\.\.\\)+{e}(?=[/\\`'\")\s]|$)"
+                path = rf"(?:^|[\s`'\"(=/\\>])(?:\.\./|\.\.\\)+{e}(?=[/\\`'\")\s]|$)"
                 # Prose that names it as a type, or as the thing to follow.
                 ctx = (rf"{n}(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+{n}"
                        rf"|\b{kind}s?\s*\(?(?:such as|e\.g\.,?|like)\s+{n}"
-                       rf"|\b(?:follow(?:ing|s)?|see|per|use|using|defer to|load)\s+(?:the\s+)?{n}")
+                       rf"|\b(?:follow(?:ing|s)?|see|per|use|using|defer to|load|apply)\s+(?:the\s+)?{n}"
+                       rf"|{n}\s+(?:[\w-]+\s+)?(?:schema|rules|conventions|standards|guidance|format|template)s?\b")
                 if re.search(path, text, re.M) or re.search(ctx, prose, re.I):
                     hits.add((kind, name))
             for kind, name in sorted(hits):

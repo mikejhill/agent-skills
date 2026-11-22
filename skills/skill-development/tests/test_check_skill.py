@@ -157,6 +157,12 @@ class CheckSkillTest(unittest.TestCase):
         msgs = [m for _, m in levels(d)]
         self.assertTrue(any("'session-handoff'" in m for m in msgs))
         self.assertFalse(any("'project-setup'" in m for m in msgs))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nRun `python3 \"<skill-dir>/../session-handoff/x.py\"`.\nApply the project-setup metadata schema.\nCreate acme.instructions.md as the output file.\n```\ncat ../../instructions/general.instructions.md\n```\n", encoding="utf-8")
+        msgs = [m for _, m in levels(d)]
+        self.assertTrue(any("'session-handoff'" in m for m in msgs))
+        self.assertTrue(any("skill 'project-setup'" in m for m in msgs))
+        self.assertTrue(any("'general'" in m for m in msgs))
+        self.assertFalse(any("'acme'" in m for m in msgs))
 
     def test_coupling_instruction_names(self) -> None:
         (self.root / "instructions").mkdir()
