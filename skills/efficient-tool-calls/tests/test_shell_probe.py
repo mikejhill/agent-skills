@@ -82,12 +82,26 @@ class Probe(unittest.TestCase):
     def test_timeout_kills_children(self):
         with tempfile.TemporaryDirectory() as d:
             mark = os.path.join(d, "child-alive")
-            argv = ["/bin/sh", "-c", "(sleep 3; touch %s) & sleep 30" % mark]
+            argv = ["/bin/sh", "-c", '(sleep 3; touch "$1") & sleep 30', "sh", mark]
             t = time.time()
             self.assertIsNone(sp.run_once(argv, {"stdout": subprocess.DEVNULL}, limit=1))
             self.assertLess(time.time() - t, 5)
             time.sleep(3)
             self.assertFalse(os.path.exists(mark), "child survived the timeout")
+
+
+    @unittest.skipUnless(os.name == "nt", "Windows process tree")
+    def test_timeout_kills_children_windows(self):
+        t = time.time()
+        self.assertIsNone(sp.run_once(["cmd", "/d", "/c", "ping -n 61 127.0.0.29 >nul"],
+                                      {"stdout": subprocess.DEVNULL}, limit=2))
+        self.assertLess(time.time() - t, 15)
+        time.sleep(1)
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                              "Get-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | "
+                              "Where-Object { $_.CommandLine -like '*127.0.0.29*' } | ForEach-Object ProcessId"],
+                             capture_output=True, text=True).stdout
+        self.assertNotRegex(out, r"\d", "ping survived the timeout")
 
 
 class Launch(unittest.TestCase):
@@ -171,10 +185,40 @@ class Cache(unittest.TestCase):
             self.assertFalse(self.run_probe()["cached"])
 
     def test_other_host_cache_ignored(self):
-        os.makedirs(os.path.dirname(self.cache))
-        with open(self.cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "host": "elsewhere", "measured_at": int(time.time()), "shells": {}}, f)
+        good = self.run_probe()
+        self.assertTrue(self.run_probe()["cached"])
+        good["host"] = "elsewhere"  # only the host differs
+        self.write_cache(good)
         self.assertFalse(self.run_probe()["cached"])
+
+    def test_incomplete_or_empty_cache_is_a_miss(self):
+        good = self.run_probe()
+        for k in ("recommendation", "fastest_posix"):  # derived fields are recomputed, not trusted
+            bad = dict(good); bad.pop(k)
+            self.write_cache(bad)
+            r = self.run_probe()
+            self.assertTrue(r["cached"])
+            self.assertEqual(r["recommendation"], good["recommendation"])
+        bad = json.loads(json.dumps(good)); next(iter(bad["shells"].values()))["median_ms"] = "fast"
+        self.write_cache(bad)
+        self.assertFalse(self.run_probe()["cached"])
+        bad = dict(good, shells={})
+        self.write_cache(bad)
+        self.assertFalse(self.run_probe()["cached"])
+
+    def test_pwsh_failure_falls_back_to_51(self):
+        orig_c, orig_t = sp.candidates, sp.time_one
+        sp.candidates = lambda: [("bash", "posix", ["b"]), ("pwsh", "powershell", ["p"]),
+                                 ("powershell", "powershell-5", ["w"])]
+        sp.time_one = lambda argv, runs: None if argv == ["p"] else {"median_ms": 100 if argv == ["b"] else 400,
+                                                                       "p90_ms": 1}
+        try:
+            r = sp.measure(1)
+        finally:
+            sp.candidates, sp.time_one = orig_c, orig_t
+        self.assertEqual(r["failed"], ["pwsh"])
+        self.assertEqual(r["fastest_powershell"], "powershell")
+        self.assertIn("prefer bash", r["recommendation"])
 
 
 if __name__ == "__main__":

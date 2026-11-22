@@ -120,11 +120,20 @@ def run_once(argv, kw, limit=30):
     def kill_tree():
         try:
             if IS_WIN:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+                root = os.environ.get("SystemRoot", "")
+                tk = os.path.join(root if os.path.isabs(root) else r"C:\Windows", "System32", "taskkill.exe")
+                r = subprocess.run([tk, "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=10)
+                if r.returncode == 0:
+                    return
             else:
                 os.killpg(p.pid, signal.SIGKILL)
-        except OSError:
+                return
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:  # tree kill failed: at least end the shell, so wait() returns
             p.kill()
+        except OSError:
+            pass
     killer = threading.Timer(limit, kill_tree)
     killer.start()
     try:
@@ -191,15 +200,40 @@ def recommend(shells):
 
 
 def measure(runs):
-    shells = {}
+    shells, failed = {}, []
     for name, fam, argv in candidates():
         t = time_one(argv, runs)
         if t:
             shells[name] = dict(t, family=fam, path=argv[0])
+        elif "-" not in fam:
+            failed.append(name)
+    if not any(v["family"] == "powershell" for v in shells.values()):  # pwsh failed: 5.1 stands in
+        for v in shells.values():
+            v["family"] = v["family"].replace("powershell-5", "powershell")
     res = {"v": CACHE_VERSION, "host": socket.gethostname(), "platform": sys.platform,
            "measured_at": int(time.time()), "runs": runs, "shells": shells}
+    if failed:
+        res["failed"] = failed
     res.update(recommend(shells))
     return res
+
+
+def valid_cache(c):
+    """A fresh, well-formed record for this host and platform, with derived fields recomputed."""
+    if not (isinstance(c, dict) and c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname()
+            and c.get("platform") == sys.platform and isinstance(c.get("measured_at"), (int, float))):
+        return None
+    shells = c.get("shells")
+    if not isinstance(shells, dict) or not shells:  # never reuse a run that found nothing
+        return None
+    for v in shells.values():
+        if not (isinstance(v, dict) and isinstance(v.get("median_ms"), (int, float))
+                and isinstance(v.get("p90_ms"), (int, float)) and isinstance(v.get("family"), str)):
+            return None
+    for k in ("fastest_posix", "fastest_powershell", "recommendation", "profile_cost_ms", "login_cost_ms"):
+        c.pop(k, None)
+    c.update(recommend(shells))
+    return c
 
 
 def main(argv=None):
@@ -213,10 +247,8 @@ def main(argv=None):
         try:
             with open(path, encoding="utf-8") as f:
                 c = json.load(f)
-            ok = (isinstance(c, dict) and c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname()
-                  and c.get("platform") == sys.platform and isinstance(c.get("measured_at"), (int, float))
-                  and isinstance(c.get("shells"), dict))
-            if ok and time.time() - c["measured_at"] < a.max_age_days * 86400:
+            c = valid_cache(c)
+            if c and time.time() - c["measured_at"] < a.max_age_days * 86400:
                 c["cached"] = True
                 print(json.dumps(c))
                 return 0
@@ -224,12 +256,14 @@ def main(argv=None):
             pass
     res = measure(max(1, a.runs))
     try:
+        if not res["shells"]:  # a run that found nothing (restricted PATH, blocked launches) isn't cached
+            raise OSError("no shell measured")
         if os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(res, f)
     except OSError as e:
-        sys.stderr.write("warning: could not write cache %s: %s\n" % (path, e))
+        sys.stderr.write("warning: not cached (%s): %s\n" % (path, e))
     res["cached"] = False
     print(json.dumps(res))
     return 0
