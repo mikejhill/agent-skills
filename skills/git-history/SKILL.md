@@ -31,23 +31,27 @@ Change existing commits with predictable, non-interactive commands, and confirm 
 
 ## Force-push
 
-Before rewriting, pin the remote tip once and reuse that exact SHA:
+Before rewriting, resolve the push destination and pin its tip once:
 
 ```bash
-dest=$(git rev-parse --abbrev-ref --symbolic-full-name '@{push}')   # e.g. origin/feature
-remote=${dest%%/*}; branch=${dest#*/}
-git fetch "$remote" "refs/heads/$branch"
+b="refs/heads/$(git symbolic-ref --short HEAD)"
+remote=$(git for-each-ref --format='%(push:remotename)' "$b")
+ref=$(git for-each-ref --format='%(push:remoteref)' "$b")
+[ -n "$ref" ] || ref=$(git for-each-ref --format='%(upstream:remoteref)' "$b")   # push.default simple/upstream
+git fetch "$remote" "$ref"
 lease=$(git rev-parse FETCH_HEAD)
-git merge-base --is-ancestor "$lease" HEAD || echo "remote has commits HEAD lacks: integrate them first"
+git merge-base --is-ancestor "$lease" HEAD && echo "remote=$remote ref=$ref lease=$lease"
 ```
+
+- If `remote` or `ref` is empty, or the push remote differs from the upstream remote (`%(upstream:remotename)`), ask the user which remote and branch the commits were pushed to.
+- If the ancestry check fails, stop: the remote has commits `HEAD` lacks. Integrate them, then run the block again.
+- Write the printed `remote`, `ref`, and `lease` into your notes; later commands may run in a fresh shell. Use those exact values, never a re-read `FETCH_HEAD`.
 
 After the rewrite, explain that a force-push is needed and collaborators must reset. With the user's explicit yes:
 
 ```bash
-git push --force-with-lease="refs/heads/$branch:$lease" "$remote" "HEAD:refs/heads/$branch"
+git push --force-with-lease="<ref>:<lease>" <remote> "HEAD:<ref>"
 ```
-
-If `@{push}` is unset, ask which remote and branch the commits were pushed to. A remote name containing `/` needs the parts set by hand.
 
 ## Fixup and autosquash
 

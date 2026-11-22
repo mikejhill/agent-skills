@@ -21,6 +21,18 @@ on:
 
 permissions: {}
 
+# Serialize the whole release sequence, downstream publish and deploy jobs
+# included. Ineligible CI completions (PRs, feature branches, failures) get
+# their own unique group, so they never enter or displace the release queue.
+# A newer pending release replacing an older one is safe: it contains it.
+concurrency:
+  group: >-
+    ${{ github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+        'release' || format('release-skip-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   # Read-only gate: exact, case-sensitive branch match before any
   # privileged job starts. (Expression `==` ignores case.)
@@ -44,10 +56,10 @@ jobs:
   release:
     needs: gate
     if: needs.gate.outputs.ok == 'true'
-    # Job-level, so ineligible runs never enter or displace the queue.
-    concurrency:
-      group: release
-      cancel-in-progress: false
+    # Grant every scope this job needs here: a job-level map replaces the
+    # workflow-level one. Add `id-token: write` for npm provenance, and
+    # `id-token: write`, `attestations: write`, `artifact-metadata: write`
+    # for attestation, only when this job performs them.
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -222,16 +234,16 @@ job so permissions are scoped. Gate every downstream job on
           path: "*.tgz"
 
       # ── Publish ──
-      # npm --provenance requires OIDC; add id-token: write to
-      # workflow or job permissions when using provenance.
+      # npm --provenance requires OIDC: add id-token: write to this
+      # job's permissions (workflow-level grants do not reach it).
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
 
-For OIDC-based npm publishing, the workflow MUST include `id-token:
-write` in permissions for `--provenance` to work. Without it, npm
-publish fails at runtime.
+For OIDC-based npm publishing, the job that runs `npm publish` needs
+`id-token: write` in its own `permissions` for `--provenance` to work.
+Without it, npm publish fails at runtime.
 
 ### Gradle (Java/Kotlin)
 
@@ -507,7 +519,7 @@ verifiable record of what was built, by whom, and from which source.
 ```
 
 Requires `attestations: write`, `artifact-metadata: write`, and
-`id-token: write` in workflow permissions. Consumers verify with
+`id-token: write` in the attesting job's own `permissions`. Consumers verify with
 `gh attestation verify`.
 
 ## Artifact Retention

@@ -26,3 +26,4 @@ Let agents rewrite git history (fixups, interactive rebases, amends) reliably wi
 - 2026-11-22: [agent] Codex review fixes on the migration: restored confirmation before every rebase; force-push lease pinned to the reviewed remote SHA.
 - 2026-11-22: [agent] Second Codex review fixes: the force-push lease SHA is recorded before rewriting, after confirming the remote tip is in local history.
 - 2026-11-22: [agent] Third Codex review fixes: Force-push section pins the lease once from the `@{push}` destination (fetch, rev-parse FETCH_HEAD, ancestry check, push the same ref).
+- 2026-11-22: [agent] Fourth (final) Codex review fixes: Force-push resolves the push remote and remote ref with `for-each-ref` (not by splitting a tracking ref), stops on a failed ancestry check, and records the values for a fresh shell.
