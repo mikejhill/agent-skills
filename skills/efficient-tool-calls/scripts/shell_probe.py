@@ -18,7 +18,8 @@ $EFFICIENT_TOOL_CALLS_CACHE, else the user cache dir (efficient-tool-calls/shell
 import argparse
 import json
 import os
-import shutil
+import math
+import signal
 import socket
 import statistics
 import subprocess
@@ -43,7 +44,7 @@ def cache_path():
     return os.path.join(base, "efficient-tool-calls", "shell-probe.json")
 
 
-def find_exe(name):
+def find_exe(name, skip=None):
     """Look `name` up on PATH, absolute directories only. Unlike shutil.which on Windows
     Python <= 3.11, never the current directory, so a workspace can't plant a `pwsh.exe`."""
     exts = [""]
@@ -58,21 +59,22 @@ def find_exe(name):
             continue
         for e in exts:
             f = os.path.join(d, name + e)
-            if os.path.isfile(f) and os.access(f, os.X_OK):
+            if os.path.isfile(f) and os.access(f, os.X_OK) and not (skip and skip(f)):
                 return f
     return None
 
 
 def win_bash():
     """Git Bash, not the WSL launcher in System32 (that starts a Linux VM)."""
+    wsl = lambda f: "system32" in f.lower()
     cands = []
     for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"),
-                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")):
-        if root:
+                 os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
+        if root and os.path.isabs(root):  # an unset variable must not become a relative path
             cands.append(os.path.join(root, "Git", "bin", "bash.exe"))
-    cands.append(find_exe("bash"))
+    cands.append(find_exe("bash", skip=wsl))  # keep searching PATH past the WSL launcher
     for c in cands:
-        if c and os.path.isfile(c) and "system32" not in c.lower():
+        if c and os.path.isfile(c) and not wsl(c):
             return c
     return None
 
@@ -104,12 +106,26 @@ def candidates():
 def run_once(argv, kw, limit=30):
     """Seconds until the shell exits, or None if it fails. Waits on the process itself
     (no timeout polling, which adds up to 50 ms on POSIX); a timer enforces `limit`."""
+    kw = dict(kw)
+    if IS_WIN:
+        kw["creationflags"] = kw.get("creationflags", 0) | 0x00000200  # CREATE_NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True  # own process group, so a timeout ends its children too
     try:
         t = time.perf_counter()
         p = subprocess.Popen(argv, **kw)
     except OSError:
         return None
-    killer = threading.Timer(limit, p.kill)
+
+    def kill_tree():
+        try:
+            if IS_WIN:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+            else:
+                os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            p.kill()
+    killer = threading.Timer(limit, kill_tree)
     killer.start()
     try:
         code = p.wait()
@@ -131,7 +147,7 @@ def time_one(argv, runs):
         if i:  # first run is a warm-up (disk cache)
             ts.append(dt * 1000)
     ts.sort()
-    return {"median_ms": round(statistics.median(ts)), "p90_ms": round(ts[min(len(ts) - 1, int(len(ts) * 0.9))])}
+    return {"median_ms": round(statistics.median(ts)), "p90_ms": round(ts[max(0, math.ceil(0.9 * len(ts)) - 1)])}
 
 
 def recommend(shells):
@@ -197,8 +213,10 @@ def main(argv=None):
         try:
             with open(path, encoding="utf-8") as f:
                 c = json.load(f)
-            fresh = time.time() - c.get("measured_at", 0) < a.max_age_days * 86400
-            if c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname() and fresh:
+            ok = (isinstance(c, dict) and c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname()
+                  and c.get("platform") == sys.platform and isinstance(c.get("measured_at"), (int, float))
+                  and isinstance(c.get("shells"), dict))
+            if ok and time.time() - c["measured_at"] < a.max_age_days * 86400:
                 c["cached"] = True
                 print(json.dumps(c))
                 return 0

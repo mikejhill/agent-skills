@@ -67,6 +67,29 @@ class Recommend(unittest.TestCase):
         self.assertEqual(r["login_cost_ms"], 700)
 
 
+class Probe(unittest.TestCase):
+    def test_p90_nearest_rank(self):
+        orig = sp.run_once
+        vals = iter([0.001] + [0.010] * 9 + [0.500])  # warm-up, nine fast, one slow
+        sp.run_once = lambda argv, kw, limit=30: next(vals)
+        try:
+            r = sp.time_one(["x"], 10)
+        finally:
+            sp.run_once = orig
+        self.assertEqual(r["p90_ms"], 10)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process groups")
+    def test_timeout_kills_children(self):
+        with tempfile.TemporaryDirectory() as d:
+            mark = os.path.join(d, "child-alive")
+            argv = ["/bin/sh", "-c", "(sleep 3; touch %s) & sleep 30" % mark]
+            t = time.time()
+            self.assertIsNone(sp.run_once(argv, {"stdout": subprocess.DEVNULL}, limit=1))
+            self.assertLess(time.time() - t, 5)
+            time.sleep(3)
+            self.assertFalse(os.path.exists(mark), "child survived the timeout")
+
+
 class Launch(unittest.TestCase):
     def test_failed_launch_is_not_timed(self):
         self.assertIsNone(sp.time_one([sys.executable, "-c", "raise SystemExit(1)"], 1))
@@ -128,6 +151,24 @@ class Cache(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn("warning", p.stderr)
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "probe.json")))
+
+    def write_cache(self, obj):
+        os.makedirs(os.path.dirname(self.cache), exist_ok=True)
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump(obj, f)
+
+    def test_other_platform_cache_ignored(self):
+        import socket
+        self.write_cache({"v": 1, "host": socket.gethostname(), "platform": "elsewhere",
+                          "measured_at": int(time.time()), "shells": {}})
+        self.assertFalse(self.run_probe()["cached"])
+
+    def test_malformed_cache_is_a_miss(self):
+        import socket
+        for bad in (None, [], {"v": 1, "host": socket.gethostname(), "platform": sys.platform,
+                                "measured_at": "yesterday", "shells": {}}):
+            self.write_cache(bad)
+            self.assertFalse(self.run_probe()["cached"])
 
     def test_other_host_cache_ignored(self):
         os.makedirs(os.path.dirname(self.cache))
