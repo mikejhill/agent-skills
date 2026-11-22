@@ -57,9 +57,9 @@ python3 "<skill-dir>/scripts/new_handoff.py" fix safari export   # use "python" 
 
 It prints `{"path": "...", "uri": "file:///..."}` and guarantees:
 
-- **Verified temp directory.** Takes the first candidate that is absolute, exists, and is writable: Windows `TEMP`, `TMP`, `TMPDIR`, accepted only inside `%USERPROFILE%`; Unix `TMPDIR`, `TEMP`, `TMP`, `/tmp`, `/var/tmp`. Never falls back to the working directory; exits non-zero instead.
-- **Private directory.** Windows: `<temp>\agent-handoffs\`, with inherited permissions removed and full control granted to the current user only (`icacls`); fails if that cannot be set. Unix: `<temp>/agent-handoffs-<uid>/`, mode `0700`, owned by the user. Rejects symlinks and junctions.
-- **No overwrites.** Creates `handoff-<YYYYMMDD-HHMMSS>-<slug>.md` exclusively, mode `0600`; on a name clash only, it tries `-2`, `-3`, and so on, up to 99.
+- **Verified temp root.** Tries, in order, Windows `TEMP`, `TMP`, `TMPDIR`; Unix `TMPDIR`, `TEMP`, `TMP`, `/tmp`, `/var/tmp`. A root qualifies only if it is an absolute, existing directory where the handoff directory can be created, and it is private: on Windows, inside `%USERPROFILE%` (the profile is ACL'd to its owner); on Unix, either owned by the user and not writable by group or others, or sticky (like `/tmp`). Never falls back to the working directory; exits non-zero instead.
+- **Private directory.** Windows: `<root>\agent-handoffs\`, inheriting the profile's owner-only ACL. Unix: `<root>/agent-handoffs-<uid>/`, mode `0700`, owned by the user. An existing entry that is a symlink, junction, non-directory, or owned by someone else stops the script.
+- **No overwrites.** Creates `handoff-<YYYYMMDD-HHMMSS>-<slug>.md` exclusively, mode `0600`, with the slug capped at 60 characters; on a name clash only, it tries `-2`, `-3`, and so on, up to 99.
 
 Write the document into the reserved file. Never write to any other path.
 
@@ -67,13 +67,15 @@ If the script exits non-zero, report its error to the user and stop. Do not pick
 
 ### Without Python
 
-Do the same steps by hand, keeping every guarantee:
+Do the same steps by hand. If any check fails, stop and report it; do not pick another location.
 
-1. Pick the temp root from the candidate list above, in that order. Accept only an absolute path to an existing, writable directory (on Windows, inside `%USERPROFILE%`). If none qualifies, stop and report.
+1. Pick the root from the same candidate list, applying the same qualification (absolute, existing; Windows: inside `%USERPROFILE%`; Unix: check with `ls -ld` that it is yours and not group- or other-writable, or that it has the sticky bit `t`).
 2. Create the handoff directory inside that root, and only there:
-   - Unix: `umask 077; mkdir -p "$root/agent-handoffs-$(id -u)"`; confirm with `ls -ld` that it is a plain directory (not a symlink), owned by you, mode `drwx------`.
-   - Windows: `New-Item -ItemType Directory -Force "$root\agent-handoffs"`; confirm `(Get-Item $dir).LinkType` is empty; then `icacls $dir /inheritance:r /grant:r "${env:USERDOMAIN}\${env:USERNAME}:(OI)(CI)F"`. Stop if any step fails.
-3. Create the file exclusively: POSIX `set -C; : > "$file"`, PowerShell `New-Item -ItemType File -Path $file`. If creation fails because the name exists, try the next suffix, up to 99. On any other error (disk full, quota, permission), stop and report it.
+   - Windows (PowerShell): `$dir = New-Item -ItemType Directory -Force "$root\agent-handoffs"`; confirm `$dir.LinkType` is empty.
+   - Unix: `umask 077; mkdir -p "$root/agent-handoffs-$(id -u)"`; confirm with `ls -ld` that it is a plain directory, owned by you, mode `drwx------`.
+3. Create the file exclusively:
+   - Windows: `New-Item -ItemType File -Path "$dir\handoff-<stamp>-<slug>.md"`. It fails on any existing entry. If the error says the name exists, try the next suffix, up to 99; on any other error, stop.
+   - Unix: `mktemp "$dir/handoff-<stamp>-<slug>.XXXXXX"`. It creates a new `0600` file with a random suffix and fails on any existing entry. The name has no `.md` extension; that is acceptable.
 
 ### Link
 

@@ -15,7 +15,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +22,7 @@ IS_WINDOWS = os.name == "nt"
 
 
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+MAX_SLUG = 60  # keeps names far below the 255-byte component limit
 
 
 def _is_link_or_junction(path: Path) -> bool:
@@ -33,23 +33,20 @@ def _is_link_or_junction(path: Path) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _usable_dir(value: str | None) -> Path | None:
-    """Return the directory if it is absolute, exists, and is writable."""
-    if not value:
-        return None
-    path = Path(value)
-    if not path.is_absolute() or not path.is_dir():
-        return None
-    if not os.access(path, os.W_OK | os.X_OK):
-        return None
-    path = path.resolve()
-    if IS_WINDOWS and not _inside_user_profile(path):
-        return None
-    return path
+class Unusable(Exception):
+    """The candidate root cannot be used; try the next one."""
+
+
+def _candidate_roots() -> list[str]:
+    names = ("TEMP", "TMP", "TMPDIR") if IS_WINDOWS else ("TMPDIR", "TEMP", "TMP")
+    roots = [os.environ.get(name) or "" for name in names]
+    if not IS_WINDOWS:
+        roots += ["/tmp", "/var/tmp"]
+    return roots
 
 
 def _inside_user_profile(path: Path) -> bool:
-    """Windows: accept only temp roots inside the user's own profile."""
+    """Windows: the profile is ACL'd to its owner, so paths inside it are private."""
     profile = os.environ.get("USERPROFILE")
     if not profile:
         return False
@@ -60,54 +57,50 @@ def _inside_user_profile(path: Path) -> bool:
     return True
 
 
-def resolve_temp_dir() -> Path:
-    """Pick the first verified temp directory. Never fall back to the cwd."""
-    names = ("TEMP", "TMP", "TMPDIR") if IS_WINDOWS else ("TMPDIR", "TEMP", "TMP")
-    candidates = [os.environ.get(name) for name in names]
-    if not IS_WINDOWS:
-        candidates += ["/tmp", "/var/tmp"]
-    for candidate in candidates:
-        found = _usable_dir(candidate)
-        if found is not None:
-            return found
-    where = "inside %USERPROFILE%" if IS_WINDOWS else "(also checked /tmp, /var/tmp)"
-    raise SystemExit(f"error: no absolute, existing, writable temp directory in {', '.join(names)} {where}")
-
-
-def _restrict_windows_acl(directory: Path) -> None:
-    """Remove inherited ACEs and grant full control to the current user only."""
-    user = os.environ.get("USERNAME")
-    domain = os.environ.get("USERDOMAIN")
-    if not user:
-        raise SystemExit("error: USERNAME is not set; cannot restrict the handoff directory")
-    principal = f"{domain}\\{user}" if domain else user
-    result = subprocess.run(
-        ["icacls", str(directory), "/inheritance:r", "/grant:r", f"{principal}:(OI)(CI)F"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise SystemExit(f"error: could not restrict {directory} to {principal}: "
-                         f"{(result.stderr or result.stdout).strip()}")
-
-
-def private_handoff_dir(temp: Path) -> Path:
-    """Create or verify a per-user handoff directory only the user can access."""
+def _check_root(value: str) -> Path:
+    """Validate a candidate temp root, raising Unusable if it does not qualify."""
+    if not value:
+        raise Unusable("unset")
+    path = Path(value)
+    if not path.is_absolute() or not path.is_dir():
+        raise Unusable("not an absolute, existing directory")
+    path = path.resolve()
     if IS_WINDOWS:
-        directory = temp / "agent-handoffs"
-        directory.mkdir(exist_ok=True)
+        if not _inside_user_profile(path):
+            raise Unusable("outside %USERPROFILE%")
+        return path
+    info = os.stat(path)
+    owned_private = info.st_uid == os.getuid() and not stat.S_IMODE(info.st_mode) & 0o022
+    sticky = bool(info.st_mode & stat.S_ISVTX)
+    if not (owned_private or sticky):
+        raise Unusable("writable by others without the sticky bit")
+    return path
+
+
+def _handoff_dir(root: Path) -> Path:
+    """Create or verify the private handoff directory inside a checked root.
+
+    Raises Unusable when the root denies creation (try the next root) and
+    SystemExit when an existing entry fails a privacy check (fail closed).
+    """
+    if IS_WINDOWS:
+        directory = root / "agent-handoffs"
+        try:
+            directory.mkdir(exist_ok=True)
+        except PermissionError as exc:
+            raise Unusable(f"cannot create {directory}: {exc}") from exc
         if _is_link_or_junction(directory) or not directory.is_dir():
             raise SystemExit(f"error: {directory} is a link, junction, or not a directory")
-        _restrict_windows_acl(directory)
         return directory
 
     uid = os.getuid()
-    directory = temp / f"agent-handoffs-{uid}"
+    directory = root / f"agent-handoffs-{uid}"
     try:
         directory.mkdir(mode=0o700)
     except FileExistsError:
         pass
+    except PermissionError as exc:
+        raise Unusable(f"cannot create {directory}: {exc}") from exc
     info = os.lstat(directory)
     if not stat.S_ISDIR(info.st_mode):
         raise SystemExit(f"error: {directory} exists and is not a plain directory")
@@ -118,9 +111,21 @@ def private_handoff_dir(temp: Path) -> Path:
     return directory
 
 
+def private_handoff_dir() -> Path:
+    """Return the first usable private handoff directory. Never the cwd."""
+    reasons = []
+    for value in _candidate_roots():
+        try:
+            return _handoff_dir(_check_root(value))
+        except Unusable as exc:
+            reasons.append(f"{value or '(unset)'}: {exc}")
+    raise SystemExit("error: no usable temp directory\n  " + "\n  ".join(reasons))
+
+
 def slugify(text: str) -> str:
     words = re.findall(r"[a-z0-9]+", text.lower())[:5]
-    return "-".join(words) or "session"
+    slug = "-".join(words)[:MAX_SLUG].strip("-")
+    return slug or "session"
 
 
 def reserve_file(directory: Path, slug: str) -> Path:
@@ -145,7 +150,7 @@ def main() -> None:
     parser.add_argument("slug", nargs="*", help="2-5 words naming the goal or focus")
     args = parser.parse_args()
 
-    path = reserve_file(private_handoff_dir(resolve_temp_dir()), slugify(" ".join(args.slug)))
+    path = reserve_file(private_handoff_dir(), slugify(" ".join(args.slug)))
     json.dump({"path": str(path), "uri": path.as_uri()}, sys.stdout)
     sys.stdout.write("\n")
 
