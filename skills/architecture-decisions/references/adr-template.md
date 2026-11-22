@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the ADR template used by the adr-generation skill and provides field-by-field guidance for filling each section. The template synthesizes the strongest elements from Nygard's original format, MADR (Markdown Any Decision Records), and Merson's rationale-focused extensions into a single, practical structure.
+This document defines the ADR template used by the architecture-decisions skill and provides field-by-field guidance for filling each section. The template synthesizes the strongest elements from Nygard's original format, MADR (Markdown Any Decision Records), and Merson's rationale-focused extensions into a single, practical structure.
 
 ## Complete Template
 
@@ -148,7 +148,7 @@ When marking `superseded`, set `superseded_by` to a relative successor link and 
 
 #### Chronology and review
 
-Do not add timestamp metadata to new ADRs. Keep relevant historical dates and uncertainty in sourced Context text; preserve existing record facts. Apply the project-documentation metadata schema. `generated.by` identifies generation, not review. Add `verified` only for actual checks, evidence, and scope; acceptance alone does not verify implementation.
+Do not add timestamp metadata to new ADRs. Keep relevant historical dates and uncertainty in sourced Context text; preserve existing record facts. Apply the technical-documentation metadata schema. `generated.by` identifies generation, not review. Add `verified` only for actual checks, evidence, and scope; acceptance alone does not verify implementation.
 
 #### `extensions.decision_makers`
 

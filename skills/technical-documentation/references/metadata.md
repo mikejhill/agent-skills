@@ -35,4 +35,4 @@ review:
 
 For a generated region within a mixed document, label region-specific provenance adjacent to the region; do not imply the whole document is generated. Document-level `generated` covers the whole document only. A verified subsection does not justify whole-document `review.status: verified`; describe a narrower claim beside that subsection instead.
 
-The JSON Schema validates field shape and lifecycle combinations. Review evidence truthfulness, source authority, region scope, and profile conflicts separately. Parse YAML without executing tags, reject duplicate keys, and validate the resulting object. A schema pass is not editorial or operational approval.
+The JSON Schema ([metadata.schema.json](../assets/metadata.schema.json)) validates field shape and lifecycle combinations. Review evidence truthfulness, source authority, region scope, and profile conflicts separately. Parse YAML without executing tags, reject duplicate keys, and validate the resulting object. A schema pass is not editorial or operational approval.

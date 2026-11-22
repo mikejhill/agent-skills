@@ -54,7 +54,7 @@ import { randomBytes } from "node:crypto";
 function printHelp() {
   const lines = readFileSync(new URL(import.meta.url), "utf8")
     .split("\n")
-    .slice(2); // skip shebang and blank
+    .slice(3); // skip shebang, blank line, and "/**"
   const helpLines = [];
   for (const line of lines) {
     if (line.startsWith(" */")) break;
@@ -178,8 +178,12 @@ function runMmdc(inputPath, outputPath, opts) {
 // ---------------------------------------------------------------------------
 
 function tempFile(ext) {
-  const id = randomBytes(8).toString("hex");
-  return join(tmpdir(), `mermaid-export-${id}${ext}`);
+  // diagram-<YYYYMMDD-HHMMSS>-<random>.<ext>, local time; deleted after export.
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const id = randomBytes(4).toString("hex");
+  return join(tmpdir(), `diagram-${stamp}-${id}${ext}`);
 }
 
 // ---------------------------------------------------------------------------

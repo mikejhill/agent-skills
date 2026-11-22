@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides complete, annotated examples of well-structured ADRs. Each example demonstrates effective use of the template, with annotations explaining why specific choices were made. These preserved examples use a historical metadata format, including dates and legacy field names. Learn from their rationale, not their frontmatter: use adr-template.md and project-documentation for new metadata. Do not copy the example identities or dates into real records.
+This document provides complete, annotated examples of well-structured ADRs. Each example demonstrates effective use of the template, with annotations explaining why specific choices were made. These preserved examples use a historical metadata format, including dates and legacy field names. Learn from their rationale, not their frontmatter: use adr-template.md and the technical-documentation skill for new metadata. Do not copy the example identities or dates into real records.
 
 ## Example 1: Full Template — Async Order Processing
 

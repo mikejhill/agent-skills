@@ -1,6 +1,10 @@
 ---
 name: project-setup
-description: Establish or review a project's foundational structure, collaboration, quality checks, testing, and releases. Use for new repositories or policy design; hosting, language, and team profiles supply concrete controls.
+description: >-
+  Foundations for a repository: layout, root files, review and integration
+  rules, quality and security checks, tests, and automated releases, with a
+  GitHub profile. Use when setting up a repository or designing or reviewing
+  its policies.
 ---
 
 # Project setup
@@ -12,7 +16,7 @@ Build the smallest maintainable project that its users can discover, run, test, 
 - Inspect existing conventions and applicable profiles before changing structure. Preserve working ecosystem conventions.
 - Keep responsibilities modular. Separate reusable logic from delivery interfaces and external integrations; avoid layers without a concrete purpose.
 - Put purpose, audience, quick start, supported use, and canonical documentation links in root `README.md`. Verify commands before presenting them as working.
-- Use `docs/` for deeper project knowledge. Apply project-documentation conventions when available; use technical-writing for wording in any location.
+- Use `docs/` for deeper project knowledge. Follow the technical-documentation skill for structure and wording.
 - Keep conventional root files where tools expect them: `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `AGENTS.md` as applicable. Create only files with a real purpose. Confirm license intent rather than inventing it.
 - Keep build/package manifests and tool configuration at their conventional paths. Profiles choose source/test layout, lockfiles, formatters, and language tools.
 - Ignore local secrets, build outputs, and temporary artifacts. Use the existing temporary-storage convention. Do not commit credentials or private organizational examples.
@@ -39,3 +43,7 @@ Build the smallest maintainable project that its users can discover, run, test, 
 ## Extend deliberately
 
 Use principles → conventions → profiles. This skill supplies principles; profiles supply language, tool, team, or enterprise choices. State scope and explicit overrides. Do not impose an enterprise tree on a personal repository or silently resolve contradictory applicable profiles. Report conflicts with their sources and proceed only on unaffected work.
+
+## References
+
+- [github.md](references/github.md): read when designing or applying rulesets, required checks, CodeQL gates, release identity, or bot PR permissions on GitHub.
