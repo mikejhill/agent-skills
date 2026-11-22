@@ -23,6 +23,7 @@ import socket
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 IS_WIN = os.name == "nt"
@@ -42,6 +43,26 @@ def cache_path():
     return os.path.join(base, "efficient-tool-calls", "shell-probe.json")
 
 
+def find_exe(name):
+    """Look `name` up on PATH, absolute directories only. Unlike shutil.which on Windows
+    Python <= 3.11, never the current directory, so a workspace can't plant a `pwsh.exe`."""
+    exts = [""]
+    if IS_WIN:
+        exts = [e for e in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if e]
+        if os.path.splitext(name)[1]:
+            exts = [""] + exts
+    cwd = os.path.normcase(os.path.abspath(os.getcwd()))
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        d = d.strip('"')
+        if not d or not os.path.isabs(d) or os.path.normcase(os.path.abspath(d)) == cwd:
+            continue
+        for e in exts:
+            f = os.path.join(d, name + e)
+            if os.path.isfile(f) and os.access(f, os.X_OK):
+                return f
+    return None
+
+
 def win_bash():
     """Git Bash, not the WSL launcher in System32 (that starts a Linux VM)."""
     cands = []
@@ -49,9 +70,7 @@ def win_bash():
                  os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")):
         if root:
             cands.append(os.path.join(root, "Git", "bin", "bash.exe"))
-    w = shutil.which("bash")
-    if w:
-        cands.append(w)
+    cands.append(find_exe("bash"))
     for c in cands:
         if c and os.path.isfile(c) and "system32" not in c.lower():
             return c
@@ -61,26 +80,43 @@ def win_bash():
 def candidates():
     """(name, family, argv) for each shell found. argv runs an empty command."""
     out = []
-    posix = [("bash", win_bash())] if IS_WIN else [(n, shutil.which(n)) for n in ("bash", "zsh")]
+    posix = [("bash", win_bash())] if IS_WIN else [(n, find_exe(n)) for n in ("bash", "zsh")]
     for name, p in posix:  # what agent shell tools run (not sh)
         if p:
             out.append((name, "posix", [p, "-c", "true"]))
             out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
     # Windows PowerShell 5.1 only stands in when pwsh 7 is missing: agent tools run pwsh, and
     # 5.1 lacks `&&`, ternaries and UTF-8 defaults, so a faster 5.1 start is no reason to use it.
-    pw = shutil.which("pwsh")
+    pw = find_exe("pwsh")
     for name in ("pwsh", "powershell") if IS_WIN else ("pwsh",):
-        p = shutil.which(name)
+        p = find_exe(name)
         if p:
             fam = "powershell" if name == "pwsh" or not pw else "powershell-5"
             out.append((name, fam, [p, "-NoProfile", "-NonInteractive", "-Command", "exit"]))
-            out.append((name + " (profile)", "powershell-profile" if fam == "powershell" else "powershell-5-profile",
-                        [p, "-NonInteractive", "-Command", "exit"]))
+            out.append((name + " (profile)", fam + "-profile", [p, "-NonInteractive", "-Command", "exit"]))
     if IS_WIN:
-        p = shutil.which("cmd")
+        p = find_exe("cmd")
         if p:
             out.append(("cmd", "cmd", [p, "/d", "/c", "exit"]))
     return out
+
+
+def run_once(argv, kw, limit=30):
+    """Seconds until the shell exits, or None if it fails. Waits on the process itself
+    (no timeout polling, which adds up to 50 ms on POSIX); a timer enforces `limit`."""
+    try:
+        t = time.perf_counter()
+        p = subprocess.Popen(argv, **kw)
+    except OSError:
+        return None
+    killer = threading.Timer(limit, p.kill)
+    killer.start()
+    try:
+        code = p.wait()
+        dt = time.perf_counter() - t
+    finally:
+        killer.cancel()
+    return dt if code == 0 else None
 
 
 def time_one(argv, runs):
@@ -89,13 +125,11 @@ def time_one(argv, runs):
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     ts = []
     for i in range(runs + 1):
-        t = time.perf_counter()
-        try:
-            subprocess.run(argv, timeout=30, **kw)
-        except (OSError, subprocess.SubprocessError):
+        dt = run_once(argv, kw)
+        if dt is None:  # failed to start, nonzero exit, or killed: don't recommend it
             return None
         if i:  # first run is a warm-up (disk cache)
-            ts.append((time.perf_counter() - t) * 1000)
+            ts.append(dt * 1000)
     ts.sort()
     return {"median_ms": round(statistics.median(ts)), "p90_ms": round(ts[min(len(ts) - 1, int(len(ts) * 0.9))])}
 
@@ -104,6 +138,11 @@ def recommend(shells):
     def best(fam):
         c = [(v["median_ms"], k) for k, v in shells.items() if v.get("family") == fam]
         return min(c) if c else None
+
+    def extra(name, suffix):  # same executable, other launch mode
+        v = shells.get("%s (%s)" % (name, suffix))
+        return v["median_ms"] - shells[name]["median_ms"] if v else None
+
     px, ps = best("posix"), best("powershell")
     r = {"fastest_posix": px[1] if px else None, "fastest_powershell": ps[1] if ps else None}
     if px and ps:
@@ -115,16 +154,23 @@ def recommend(shells):
             fast, slow = (px[1], ps[1]) if diff > 0 else (ps[1], px[1])
             r["recommendation"] = ("prefer %s for general command-line work: %d ms faster to start per call "
                                    "than %s; keep %s for work only it can do" % (fast, abs(diff), slow, slow))
-        prof = best("powershell-profile")
-        if prof and prof[0] - ps[0] >= CLOSE_MS:
-            r["profile_cost_ms"] = prof[0] - ps[0]
-    elif px or ps:
-        r["recommendation"] = "only %s found: nothing to choose" % (px or ps)[1]
     else:
-        r["recommendation"] = "no shell found"
-    login = best("posix-login")
-    if px and login and login[0] - px[0] >= CLOSE_MS:
-        r["login_cost_ms"] = login[0] - px[0]
+        found = [k for k, v in shells.items() if "-" not in v.get("family", "")]
+        if px or ps:
+            r["recommendation"] = ("no %s found to compare with; measured: %s"
+                                   % ("PowerShell" if px else "POSIX shell", ", ".join(found)))
+        elif found:
+            r["recommendation"] = "no POSIX shell or PowerShell found; measured: %s" % ", ".join(found)
+        else:
+            r["recommendation"] = "no shell found"
+    if ps:
+        cost = extra(ps[1], "profile")
+        if cost is not None and cost >= CLOSE_MS:
+            r["profile_cost_ms"] = cost
+    if px:
+        cost = extra(px[1], "login")
+        if cost is not None and cost >= CLOSE_MS:
+            r["login_cost_ms"] = cost
     return r
 
 
@@ -160,7 +206,8 @@ def main(argv=None):
             pass
     res = measure(max(1, a.runs))
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.dirname(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(res, f)
     except OSError as e:

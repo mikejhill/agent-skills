@@ -23,8 +23,10 @@ minutes. Spend fewer, better calls.
    helper commands a tool already provides instead of re-writing them each call.
 3. **Bound output.** Filter at the source (`--max`, `head`, `grep`, `Select-Object
    -First`), so results stay small. Large results cost model time on every later turn.
-4. **Don't discard output you need.** `>/dev/null` or `| Out-Null` on an action hides its
-   errors and timeouts; filter it instead.
+4. **Don't discard output you need.** Many tools report timeouts, warnings, and partial
+   failures on stdout; `>/dev/null`, `| Out-Null`, or merging stderr into a discarded
+   stream hides them. Filter instead. Discarding stdout that only ever holds noise is
+   fine.
 5. **Don't poll with sleeps.** Use a tool's own wait or condition flags, a blocking
    command, or the harness's background/notification feature.
 6. **Reuse long-lived helpers.** Prefer a running daemon, broker, or REPL that a tool
@@ -45,8 +47,10 @@ network home folders); PowerShell 7 may take 0.3 s or 1.5 s with a heavy profile
 measure once per machine and reuse the answer:
 
 ```text
-python scripts/shell_probe.py          # Windows: python or py -3; else python3
+python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else python3
 ```
+
+`<skill-dir>` is the folder that holds this SKILL.md, not the current workspace.
 
 - It times an empty command in each shell found (bash or zsh, `pwsh`, Windows
   PowerShell, `cmd`), 5 runs after a warm-up, and prints JSON with `median_ms` per
@@ -67,6 +71,7 @@ Then:
 |---|---|
 | Only one shell tool | Use it; nothing to choose |
 | `recommendation` says `either` (under 150 ms apart) | Pick by task; don't switch for speed |
+| Your harness starts shells another way (login bash, PowerShell with profile) | Compare the matching entries (`bash (login)`, `pwsh (profile)`) instead of the bare ones, with the same 150 ms threshold |
 | One shell is faster by 150 ms or more | Use it for general command-line work: `git`, `python`, build and test tools, file reads |
 | Work only one shell does well | Use that shell regardless: cmdlets, the registry, .NET and CIM objects in PowerShell; pipes through `grep`/`sed`/`awk` in a POSIX shell |
 | Python is not available | Time one empty call per shell by hand (`time bash -c true`; `Measure-Command { pwsh -NoProfile -c exit }`) and apply the same rule |

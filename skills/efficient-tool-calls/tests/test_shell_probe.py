@@ -49,8 +49,44 @@ class Recommend(unittest.TestCase):
         self.assertEqual(r["login_cost_ms"], 615)
 
     def test_single_family(self):
-        r = sp.recommend(sh("bash", "posix", 5))
-        self.assertIn("nothing to choose", r["recommendation"])
+        r = sp.recommend({**sh("bash", "posix", 5), **sh("zsh", "posix", 7)})
+        self.assertIn("no PowerShell found to compare with; measured: bash, zsh", r["recommendation"])
+
+    def test_cmd_only(self):
+        r = sp.recommend(sh("cmd", "cmd", 40))
+        self.assertIn("no POSIX shell or PowerShell found; measured: cmd", r["recommendation"])
+
+    def test_profile_cost_without_posix(self):
+        r = sp.recommend({**sh("pwsh", "powershell", 250), **sh("pwsh (profile)", "powershell-profile", 1200)})
+        self.assertEqual(r["profile_cost_ms"], 950)
+
+    def test_login_cost_is_same_executable(self):
+        r = sp.recommend({**sh("bash", "posix", 50), **sh("bash (login)", "posix-login", 750),
+                          **sh("zsh", "posix", 80), **sh("zsh (login)", "posix-login", 100)})
+        self.assertEqual(r["fastest_posix"], "bash")
+        self.assertEqual(r["login_cost_ms"], 700)
+
+
+class Launch(unittest.TestCase):
+    def test_failed_launch_is_not_timed(self):
+        self.assertIsNone(sp.time_one([sys.executable, "-c", "raise SystemExit(1)"], 1))
+        self.assertIsNone(sp.time_one([os.path.join(tempfile.gettempdir(), "no-such-shell-xyz")], 1))
+        self.assertIsNotNone(sp.time_one([sys.executable, "-c", "pass"], 1))
+
+    def test_current_directory_is_not_searched(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe = os.path.join(d, "fakeshell-xyz" + (".exe" if os.name == "nt" else ""))
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(exe, 0o755)
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            os.chdir(d)
+            os.environ["PATH"] = os.pathsep.join([".", "", oldpath])
+            try:
+                self.assertIsNone(sp.find_exe("fakeshell-xyz"))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
 
 
 class Cache(unittest.TestCase):
@@ -61,7 +97,9 @@ class Cache(unittest.TestCase):
         return json.loads(p.stdout)
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.tmp = td.name
         self.cache = os.path.join(self.tmp, "sub", "probe.json")
         self.env = dict(os.environ, EFFICIENT_TOOL_CALLS_CACHE=self.cache)
 
@@ -82,6 +120,14 @@ class Cache(unittest.TestCase):
             json.dump(c, f)
         self.assertFalse(self.run_probe()["cached"])
         self.assertFalse(self.run_probe("--force")["cached"])
+
+    def test_bare_filename_cache(self):
+        self.env["EFFICIENT_TOOL_CALLS_CACHE"] = "probe.json"
+        p = subprocess.run([sys.executable, os.path.abspath(SCRIPT), "--runs", "1"], capture_output=True,
+                           text=True, env=self.env, cwd=self.tmp, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("warning", p.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "probe.json")))
 
     def test_other_host_cache_ignored(self):
         os.makedirs(os.path.dirname(self.cache))
