@@ -2,7 +2,7 @@
 
 Run from the repository root:
 
-    python -m pytest -c .github/ci/pytest.ini
+    python -m pytest
 
 Each skill's own unittest files under skills/*/tests are collected alongside
 these. The skills' end-to-end smoke scripts (tests/smoke_test.py) are plain
@@ -76,7 +76,10 @@ def test_html_report_example_is_current(tmp_path: Path) -> None:
     skill = SKILLS / "html-report"
     out = tmp_path / "sample-report.html"
     assert_ok(run(PY, skill / "scripts" / "build_report.py", skill / "examples" / "sample-report.src.html", out))
-    assert out.read_bytes() == (skill / "examples" / "sample-report.html").read_bytes(), (
+    def text(path: Path) -> str:  # checkouts may convert line endings
+        return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+    assert text(out) == text(skill / "examples" / "sample-report.html"), (
         "examples/sample-report.html is stale: rebuild it with scripts/build_report.py")
     assert_ok(run(PY, skill / "scripts" / "check_report.py", out))
 

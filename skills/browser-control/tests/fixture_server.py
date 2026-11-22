@@ -60,7 +60,7 @@ EXTRA = {
         '<span class="tag">new</span><span class="tag">sale</span></div>'
         % (i, i, i, '<b class=price>$%d.00</b>' % (i * 3) if i % 3 else '') for i in range(1, 7)),
     "/late": "<!doctype html><title>Late</title><h1>Late</h1><script>setTimeout(() => "
-             "document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>'), 800)</script>" + BEACON,
+             "(window.lateAt = Date.now(), document.body.insertAdjacentHTML('beforeend', '<p>Late text</p>')), 800)</script>" + BEACON,
 }
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self,*a): pass
@@ -79,4 +79,10 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             body=PAGE.encode(); ct='text/html'
         self.send_response(200); self.send_header('Content-Type',ct); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
-http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+class Server(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind resolves socket.getfqdn(host), which can stall for tens of
+        # seconds where reverse DNS is slow (macOS CI runners). The name is unused here.
+        http.server.socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+Server(('127.0.0.1', int(sys.argv[1])), H).serve_forever()

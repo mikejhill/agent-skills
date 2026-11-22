@@ -224,9 +224,15 @@ def main():
                 and res.get("busy") and "Chain done" not in res.get("text", "") and "warning:" in e, o + e)
         code, o, e = r.cli("nav", base + "late", "-t", tid, "--no-wait")
         code, o, e = r.cli("wait", "-t", tid, "--for-text", "Late text")
+        done = time.time()
         res = json.loads(o) if code == 0 else {}
+        # The fixture stamps window.lateAt (epoch ms) when it inserts the text. Measure from that
+        # event to the CLI's return; the 0.5 s budget is the 0.3 s poll target plus process exit.
+        _, at, _ = r.cli("eval", "window.lateAt", "-t", tid)
+        latency = done - float(at or "nan") / 1000
         r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
-                0.6 < res.get("waited", 0) < 1.1 and "settle" not in res, o + e)
+                res.get("waited", 0) > 0.2 and 0 <= latency < 0.5 and "settle" not in res,
+                "latency %.2f s; " % latency + o + e)
         # change summary and text --changed
         code, o, e = r.cli("nav", base + "long", "-t", tid)
         res = json.loads(o) if code == 0 else {}

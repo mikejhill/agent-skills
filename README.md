@@ -47,7 +47,7 @@ Without SkillSinc, copy a skill folder into your harness's skills directory (for
 
 ## Checks
 
-[CI](.github/workflows/ci.yml) runs on every pull request and on `main`. The `ci-pass` job aggregates the others and is the required check for merging.
+[CI](.github/workflows/ci.yml) runs on every pull request and on `main`. The `ci-pass` job aggregates the others; it and `pr-title` ([pr-title.yml](.github/workflows/pr-title.yml)) are the required checks for merging.
 
 | Job | What it checks |
 | --- | --- |
@@ -57,15 +57,17 @@ Without SkillSinc, copy a skill folder into your harness's skills directory (for
 | Tests | Skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
 | PR title | Conventional Commits |
 
-Run them locally from the repository root:
+Run them locally from the repository root (needs Python 3.11+, Node.js, and PowerShell 7):
 
 ```bash
 pip install -r .github/ci/requirements.txt -r .github/ci/requirements-test.txt
 python .github/ci/skills_ref_check.py
 python skills/skill-development/scripts/check_skill.py skills
 ruff check . && yamllint --strict . && actionlint
+git ls-files '*.sh' | xargs shellcheck
+pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser -Force; git ls-files "*.ps1" | % { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error }'
 npx markdownlint-cli2
-python -m pytest -c .github/ci/pytest.ini --rootdir .
+python -m pytest
 ```
 
 ## License
