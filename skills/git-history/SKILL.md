@@ -26,7 +26,7 @@ Change existing commits with predictable, non-interactive commands, and confirm 
 - Never open an editor. Interactive editors are unavailable to agents. Set `GIT_SEQUENCE_EDITOR` and edit the todo file directly ([rebase-editor.md](references/rebase-editor.md)). Never use `--edit-todo`.
 - Use `--autostash` on rebases when the working tree is dirty.
 - New or reworded messages follow the repository's commit conventions.
-- If the rewritten commits were already pushed, explain that a force-push is needed and that collaborators must reset. Get the user's explicit yes, then pin the lease to the remote tip you showed them: `git push --force-with-lease=<branch>:<reviewed-remote-sha>`, never `--force`. A bare `--force-with-lease` compares against the remote-tracking ref, which a background fetch can update.
+- If the commits were already pushed, before rewriting: `git fetch`, confirm `git merge-base --is-ancestor origin/<branch> HEAD` (pull first if not), and record `origin/<branch>`'s SHA. After the rewrite, explain that a force-push is needed and collaborators must reset. Get the user's explicit yes, then push with `git push --force-with-lease=<branch>:<recorded-sha>`, never `--force`. A bare `--force-with-lease` compares against the remote-tracking ref, which a background fetch can update.
 - If anything goes wrong mid-rebase, `git rebase --abort` restores the original state.
 
 ## Fixup and autosquash

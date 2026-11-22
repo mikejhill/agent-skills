@@ -22,7 +22,7 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 | Workflow | File | Trigger | Job |
 | --- | --- | --- | --- |
 | CI | `ci.yml` | `push` to default branch, `pull_request`, `merge_group` | Validate. Never publishes. |
-| Release | `release.yml` | Automatic: `workflow_run` after CI succeeds on the default branch. `workflow_dispatch` only as a force-patch escape hatch | Version, tag, release, publish |
+| Release | `release.yml` | Automatic: `workflow_run` after CI succeeds on the default branch. `workflow_dispatch` only to force a patch on a CI-verified commit | Version, tag, release, publish |
 | Deploy (optional) | `deploy.yml` | `release` or `workflow_dispatch` | Promote a release to an environment |
 
 ## CI rules
@@ -30,7 +30,7 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 - Parallel jobs, no `needs` without a real dependency: commit lint (PRs only), lint, test, build (no publish). Add a `ci-pass` aggregator job as the single required check ([advanced-patterns.md](references/advanced-patterns.md)).
 - Explicit top-level `permissions` (CI: `contents: read`, `checks: write`, `pull-requests: read`).
 - `concurrency` with `group: ci-${{ github.ref }}` and `cancel-in-progress: true`. Releases use `cancel-in-progress: false`.
-- `paths-ignore` for docs on `push` only. On `pull_request` it can block required checks.
+- No `paths-ignore` in CI. On `pull_request` it blocks required checks; on default-branch `push` it hides the newest tip from the release workflow, which can strand a release.
 - `timeout-minutes` on every job, at 2-3 times the expected duration.
 - Linux runners unless the project needs another OS (Windows costs 2x, macOS 10x).
 - Matrices use `fail-fast: false`, only supported combinations, and descriptive job names. Collect coverage on one leg and enforce the threshold with the ecosystem tool.
@@ -43,12 +43,12 @@ Strictly in order; any failure stops the run:
 
 1. Checkout the commit CI verified (`workflow_run.head_sha`) with `fetch-depth: 0`.
 2. Compute the next version from commits since the last tag (dry run).
-3. If nothing is releasable, end the run successfully without releasing. A manual force-patch run fails instead.
+3. If nothing is releasable, end the run successfully without releasing.
 4. Run the full lint and test suite.
 5. Promote `[Unreleased]` in `CHANGELOG.md`, checking the section exists before and the new header after.
 6. Bump version files (`package.json`, `pyproject.toml`, and so on).
 7. Build artifacts.
-8. Commit all changed files as the bot, tag, and push both together.
+8. Commit all changed files as the bot, tag, and push both atomically with a lease on the verified SHA.
 9. Create the GitHub Release with artifacts and generated notes.
 10. Publish to registries, preferring OIDC trusted publishing.
 

@@ -15,4 +15,4 @@ Loads automatically when you ask the agent to change commits that already exist.
 
 ## Security and side effects
 
-Rewriting pushed commits needs a force-push. The agent asks before any force-push, and uses `--force-with-lease` pinned to the remote commit it showed you, so the push fails if anyone pushed since.
+Rewriting pushed commits needs a force-push. The agent asks before any force-push, and uses `--force-with-lease` pinned to the remote commit it recorded before rewriting, so the push fails if anyone pushed since.

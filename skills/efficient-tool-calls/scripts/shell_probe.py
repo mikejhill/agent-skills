@@ -20,6 +20,7 @@ $EFFICIENT_TOOL_CALLS_CACHE, else <user-cache>/agent-skills/efficient-tool-calls
 import argparse
 import json
 import os
+import pathlib
 import math
 import signal
 import socket
@@ -40,7 +41,8 @@ def cache_path():
         return os.environ["EFFICIENT_TOOL_CALLS_CACHE"]
     def abs_env(var, default):
         v = os.environ.get(var, "")
-        return v if v and os.path.isabs(v) else default  # ignore relative values
+        # Path.is_absolute: os.path.isabs accepts drive-relative "\\x" on Windows before 3.13.
+        return v if v and pathlib.Path(v).is_absolute() else default  # ignore relative values
 
     if IS_WIN:
         base = abs_env("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))

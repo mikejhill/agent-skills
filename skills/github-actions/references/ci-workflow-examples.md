@@ -13,7 +13,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:
@@ -134,7 +133,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:
@@ -235,7 +233,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:
@@ -346,7 +343,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:
@@ -447,7 +443,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:
@@ -532,7 +527,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ["*.md", "docs/**", "LICENSE"]
   pull_request:
     branches: [main]
   merge_group:

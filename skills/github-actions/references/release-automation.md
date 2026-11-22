@@ -18,7 +18,6 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       force-patch:
@@ -28,6 +27,7 @@ on:
 
 permissions:
   contents: write
+  actions: read # verify CI for manual runs
 
 concurrency:
   group: release
@@ -36,15 +36,32 @@ concurrency:
 jobs:
   release:
     # Release only commits that CI verified on the default branch.
+    # Manual runs exist only to force a patch release.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.force-patch &&
+       github.ref_name == github.event.repository.default_branch) ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Require successful CI for manual runs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          ok=$(gh run list -R "$GITHUB_REPOSITORY" --workflow CI --commit "$SHA" \
+            --event push --status success --json databaseId --jq length)
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::CI has not passed for $SHA. Wait for it, then re-run."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -60,13 +77,8 @@ jobs:
           force-bump-patch-version: ${{ inputs.force-patch || false }}
           dry: true
 
-      # Automatic runs with nothing releasable (docs, chore, ci) end here
-      # successfully. A manual run with nothing releasable fails loudly.
-      - name: Require version bump on manual runs
-        if: steps.version.outputs.version == '' && github.event_name == 'workflow_dispatch'
-        run: |
-          echo "::error::No releasable commits found. Add feat:/fix: commits or use force-patch."
-          exit 1
+      # Nothing releasable (docs, chore, ci): later steps skip and the run
+      # ends green.
 
       # ── Validation ──────────────────────────────────────────
       # INSERT: ecosystem-specific lint + test steps here.
@@ -105,17 +117,20 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BRANCH: ${{ github.event.repository.default_branch }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(release): v$VERSION"
           git tag "v$VERSION"
-          # The push is rejected if the branch moved since CI verified
-          # this commit. That is safe: CI on the newer commit triggers
-          # the next release run, which includes these changes.
-          # GITHUB_TOKEN pushes do not trigger CI, so this cannot loop.
-          git push --atomic origin "HEAD:refs/heads/$BRANCH" "v$VERSION"
+          # The lease rejects the push if the branch moved since CI
+          # verified this commit, forward or back. Forward is safe: CI
+          # runs on every default-branch push (no paths-ignore), and its
+          # release run includes these changes. After a rollback, nothing
+          # is pushed. GITHUB_TOKEN pushes do not trigger CI, so no loop.
+          git push --atomic --force-with-lease="refs/heads/$BRANCH:$VERIFIED_SHA" \
+            origin "HEAD:refs/heads/$BRANCH" "v$VERSION"
 
       - name: Create GitHub Release
         if: steps.version.outputs.version != ''
@@ -135,8 +150,9 @@ jobs:
 
 ### Trigger notes
 
-- `workflow_run` fires only from the workflow file on the default branch, and `workflows:` must match the CI workflow's `name:` exactly.
-- Only `push` runs of CI qualify, so PR runs never release.
+- `workflow_run` fires only from the workflow file on the default branch, and `workflows:` must match the CI workflow's `name:` exactly. The job condition compares `head_branch` with the repository's default branch, so no branch name is hard-coded.
+- Only `push` runs of CI qualify, so PR runs never release. CI must run on every default-branch push, with no `paths-ignore`, or a docs-only push can strand a pending release.
+- A manual run requires `force-patch` and a successful CI run for the same commit.
 - Every merged `feat`/`fix` releases. To batch releases, merge less often or use a release PR tool such as Release Please; do not add a dispatch button as the gate.
 
 ## Ecosystem-Specific Snippets

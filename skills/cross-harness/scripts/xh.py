@@ -89,16 +89,18 @@ def state_home() -> Path:
     env = os.environ.get(HOME_ENV)
     if env:
         return Path(env).expanduser()
-    def abs_env(var: str, default: Path) -> Path:
+    def abs_env(var: str, *fallback: str) -> Path:
         v = os.environ.get(var, "")
-        return Path(v) if v and Path(v).is_absolute() else default  # ignore relative values
+        if v and Path(v).is_absolute():  # ignore relative values
+            return Path(v)
+        return Path.home().joinpath(*fallback)  # resolve home only when needed
 
     if IS_WIN:
-        base = abs_env("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+        base = abs_env("LOCALAPPDATA", "AppData", "Local")
     elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Caches"
     else:
-        base = abs_env("XDG_CACHE_HOME", Path.home() / ".cache")
+        base = abs_env("XDG_CACHE_HOME", ".cache")
     return base / "agent-skills" / "cross-harness"
 
 

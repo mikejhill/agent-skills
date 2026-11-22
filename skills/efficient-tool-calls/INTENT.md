@@ -56,3 +56,4 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   rounds; remaining findings were narrow).
 - 2026-11-22: [agent] Migrated to the `skill-development` standard: shorter description, README, and a Requirements section from the operator's asks in the log. No changes to the body or script. Known deviation: the probe cache lives in `<user-cache>/efficient-tool-calls/` rather than under an `agent-skills/` parent.
 - 2026-11-22: [operator] "Do not worry about any existing resources, running brokers/jobs, orphaning content as it sits today, etc. Just make everything match the ideal end state." Probe cache moved to `<user-cache>/agent-skills/efficient-tool-calls/shell-probe.json`; Windows fallback is now `~\AppData\Local`, not `~`; relative env roots ignored.
+- 2026-11-22: [agent] Second Codex review fixes: env roots checked with `Path.is_absolute` (rejects drive-relative Windows paths).

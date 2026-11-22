@@ -36,7 +36,7 @@ Original seven-file TypeScript skill captured in canonical Git commit `86382d6` 
 
 ## Validation record
 
-Baseline environment: Windows, Node 24.7.0. Tools are installed only inside isolated fixtures with install scripts disabled; no global installation, credentials, network-policy changes, or real-project mutation.
+Baseline environment: Windows, Node 24.7.0. TypeScript is pinned to 6.0.3 because typescript-eslint 8.72.1 requires `>=4.8.4 <6.1.0`. Tools are installed only inside isolated fixtures with install scripts disabled; no global installation, credentials, network-policy changes, or real-project mutation.
 
 - Skill frontmatter/schema and all relative reference links checked.
 - Exact compiler/lint templates and complete source examples exercised in an isolated package: strict source/test typecheck, typed lint, formatter check, behavior tests, declaration build and emitted ESM loading.
@@ -50,3 +50,4 @@ Consult current primary documentation linked in references before upgrading. Exa
 - 2026-04-10: Initial Biome/tsx/use-case/CLI profiles and fnm runtime guidance.
 - 2026-10-29: Review against actual Python skill; preserve original; add modular boundaries, comprehensive typing/typed lint, runtime/package discipline, compatible module profiles and isolated forward tests. Correct invalid Biome 2 keys, emitted extension examples, unsafe JSON casts and parser side effects.
 - 2026-11-22: [agent] Migrated to the `skill-development` standard: Goals and Requirements sections added from the existing content; shorter description; README added. Preservation, validation record, and log entries kept verbatim.
+- 2026-11-22: [agent] Restored the TypeScript 6.0.3 pin rationale (typescript-eslint 8.72.1 requires `>=4.8.4 <6.1.0`) to the validation record; it had existed only in a reconstructed log entry.

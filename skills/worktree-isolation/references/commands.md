@@ -41,7 +41,7 @@ git -C "$wt_path" commit -m "<type>(<scope>): <summary>"
 
 ## Apply
 
-Run one of these, matching the strategy in `SKILL.md`. Never both.
+Run at most one of these, matching the strategy in `SKILL.md`. Never both. For speculative or experimental work, run neither: report the branch name only.
 
 For a PR or review:
 

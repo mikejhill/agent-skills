@@ -39,6 +39,7 @@ import collections
 import io
 import json
 import os
+import pathlib
 import secrets
 import socket
 import struct
@@ -333,7 +334,9 @@ def default_idle():
 
 def _abs_env(var, default):
     v = os.environ.get(var, "")
-    return v if v and os.path.isabs(v) else default  # ignore relative values
+    # Path.is_absolute, not os.path.isabs: on Windows before Python 3.13, isabs accepts
+    # drive-relative "\\cache", which resolves differently per current drive.
+    return v if v and pathlib.Path(v).is_absolute() else default  # ignore relative values
 
 
 def state_dir():
