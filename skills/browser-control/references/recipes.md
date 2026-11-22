@@ -2,6 +2,14 @@
 
 `C` = `python scripts/browser.py`, `T` = a target from `C targets`. All verified against Chromium.
 
+## How it works
+
+The broker speaks the Chrome DevTools Protocol (CDP) over the browser's remote-debugging
+endpoint. That is an implementation detail; reach for it directly only through `send`,
+`events` and `batch` when no command covers the task. Method reference:
+<https://chromedevtools.github.io/devtools-protocol/> (tip-of-tree). Errors come back as
+`CDP error -32601/-32602 ...`.
+
 ## Reading pages
 
 ```

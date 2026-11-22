@@ -15,28 +15,62 @@ ecosystem by replacing the validation, build, and publish steps.
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      force-patch:
-        description: "Force a patch bump when no feat/fix commits exist"
-        type: boolean
-        default: false
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
-permissions:
-  contents: write
+permissions: {}
 
+# Serialize the whole release sequence, downstream publish and deploy jobs
+# included. Ineligible CI completions (PRs, feature branches, failures) get
+# their own unique group, so they never enter or displace the release queue.
+# A newer pending release replacing an older one is safe: it contains it.
 concurrency:
-  group: release
+  group: >-
+    ${{ github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+        'release' || format('release-skip-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
+  # Read-only gate: exact, case-sensitive branch match before any
+  # privileged job starts. (Expression `==` ignores case.)
+  gate:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$HEAD_BRANCH" = "$DEFAULT_BRANCH" ]; then ok=true; else ok=false; fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
+    # Grant every scope this job needs here: a job-level map replaces the
+    # workflow-level one. Add `id-token: write` for npm provenance, and
+    # `id-token: write`, `attestations: write`, `artifact-metadata: write`
+    # for attestation, only when this job performs them.
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Determine next version
@@ -45,21 +79,20 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           allow-initial-development-versions: true
-          force-bump-patch-version: ${{ inputs.force-patch }}
           dry: true
 
-      - name: Require version bump
-        if: steps.version.outputs.version == ''
-        run: |
-          echo "::error::No releasable commits found. Add feat:/fix: commits or use force-patch."
-          exit 1
+      # Nothing releasable (docs, chore, ci): later steps skip and the run
+      # ends green.
 
       # ── Validation ──────────────────────────────────────────
       # INSERT: ecosystem-specific lint + test steps here.
-      # These MUST pass before any release artifacts are created.
+      # These must pass before any release artifacts are created.
+      # Add `if: steps.version.outputs.version != ''` to every step
+      # from here on, so non-releasable pushes skip them.
       # ────────────────────────────────────────────────────────
 
       - name: Validate CHANGELOG structure
+        if: steps.version.outputs.version != ''
         run: |
           grep -q "^## \[Unreleased\]" CHANGELOG.md || {
             echo "::error::CHANGELOG.md missing [Unreleased] section"
@@ -67,6 +100,7 @@ jobs:
           }
 
       - name: Update CHANGELOG.md
+        if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -83,20 +117,27 @@ jobs:
       # ────────────────────────────────────────────────────────
 
       - name: Commit release changes and push tag
+        if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(release): v$VERSION"
           git tag "v$VERSION"
-          # Push may fail if commits were pushed between checkout and
-          # now (e.g., a PR merged during the release). If this occurs,
-          # re-run the workflow — it will pick up the new commits.
-          git push origin HEAD "v$VERSION"
+          # The lease rejects the push if the branch moved since CI
+          # verified this commit, forward or back. Forward is safe: CI
+          # runs on every default-branch push (no paths-ignore), and its
+          # release run includes these changes. After a rollback, nothing
+          # is pushed. GITHUB_TOKEN pushes do not trigger CI, so no loop.
+          git push --atomic --force-with-lease="refs/heads/$BRANCH:$VERIFIED_SHA" \
+            origin "HEAD:refs/heads/$BRANCH" "v$VERSION"
 
       - name: Create GitHub Release
+        if: steps.version.outputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.version.outputs.version }}"
@@ -110,6 +151,13 @@ jobs:
       # or use a separate job (see OIDC patterns below).
       # ────────────────────────────────────────────────────────
 ```
+
+### Trigger notes
+
+- `workflow_run` fires only from the workflow file on the default branch, and `workflows:` must match the CI workflow's `name:` exactly. The gate compares `head_branch` with the repository's default branch in shell, case-sensitively, so no branch name is hard-coded.
+- Only successful `push` runs of CI on the default branch qualify, so PR and feature-branch runs never release. CI must run on every default-branch push, with no `paths-ignore`, or a docs-only push can strand a pending release.
+- There is no manual trigger: every release comes from a CI-verified commit. To release when no `feat`/`fix` commit is pending, merge one (for example `fix: ...` for the change that warrants it).
+- Every merged `feat`/`fix` releases. To batch releases, merge less often or use a release PR tool such as Release Please; do not add a dispatch button as the gate.
 
 ## Ecosystem-Specific Snippets
 
@@ -139,11 +187,13 @@ appropriate snippets for your ecosystem.
 ```
 
 PyPI publishing uses OIDC trusted publishers and runs as a separate
-job so permissions are scoped:
+job so permissions are scoped. Gate every downstream job on
+`needs.release.outputs.version`, so non-releasable pushes publish nothing:
 
 ```yaml
   pypi:
     needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi
@@ -184,16 +234,16 @@ job so permissions are scoped:
           path: "*.tgz"
 
       # ── Publish ──
-      # npm --provenance requires OIDC; add id-token: write to
-      # workflow or job permissions when using provenance.
+      # npm --provenance requires OIDC: add id-token: write to this
+      # job's permissions (workflow-level grants do not reach it).
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
 
-For OIDC-based npm publishing, the workflow MUST include `id-token:
-write` in permissions for `--provenance` to work. Without it, npm
-publish fails at runtime.
+For OIDC-based npm publishing, the job that runs `npm publish` needs
+`id-token: write` in its own `permissions` for `--provenance` to work.
+Without it, npm publish fails at runtime.
 
 ### Gradle (Java/Kotlin)
 
@@ -366,6 +416,7 @@ use GitHub environments with protection rules:
 ```yaml
   deploy-staging:
     needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
@@ -400,10 +451,12 @@ depending on the `release` job:
 ```yaml
   npm:
     needs: release
+    if: needs.release.outputs.version != ''
     # ... npm publish steps
 
   github-packages:
     needs: release
+    if: needs.release.outputs.version != ''
     # ... GitHub Packages publish steps
 ```
 
@@ -466,7 +519,7 @@ verifiable record of what was built, by whom, and from which source.
 ```
 
 Requires `attestations: write`, `artifact-metadata: write`, and
-`id-token: write` in workflow permissions. Consumers verify with
+`id-token: write` in the attesting job's own `permissions`. Consumers verify with
 `gh attestation verify`.
 
 ## Artifact Retention

@@ -19,6 +19,16 @@ the purpose.
 5. Zero dependencies: one stdlib-only Python file, cross-platform.
 6. Safe by default: real browser, so read-first, confirm side effects, never leak cookies.
 
+## Requirements
+
+- Control the user's own running browser for tasks; CDP is an implementation detail, and inspection is a feature, not the purpose.
+- One approval per broker run (operator decision, 2026-11-20).
+- Never relaunch the user's browser with flags; guide them to the remote-debugging toggle instead.
+- Never stop, restart, or navigate the user's live broker or tabs during benchmarking or tests; use an isolated browser and neutral sites.
+- One stdlib-only Python file, cross-platform, no dependencies.
+- Read first, confirm side effects, never leak cookies or tokens.
+- Larger changes are verified before merge against the operator's local Edge, not only headless Chromium.
+
 ## Log
 
 - 2026-11-10: [agent] Created skill (as `cdp`, renamed `browser-devtools` same day): devtools.py (minimal RFC 6455 client, token-protected
@@ -86,3 +96,7 @@ the purpose.
   broker now turns on focus emulation for each tab it attaches to, so driven tabs act
   visible and focused; `active`/`--focus` probes switch it off briefly to read the real
   state. Smoke test: UTF-8 subprocess output and full process-tree teardown on Windows.
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: description cut from 460 to about 280 characters, README added, Requirements section added from the goals and the operator's recorded decisions. No changes to the body or script. Known deviations left alone, because they need a script change and Edge verification: state lives in `<user-cache>/browser-control/` rather than `<user-cache>/agent-skills/browser-control/` (moving it would orphan a running broker), and `SKILL.md` is 216 lines against the 200-line target.
+- 2026-11-22: [operator] "Do not worry about any existing resources, running brokers/jobs, orphaning content as it sits today, etc. Just make everything match the ideal end state." Broker state moved to `<user-cache>/agent-skills/browser-control/`; relative env roots ignored. The old `<user-cache>/browser-control/` is no longer read.
+- 2026-11-22: [agent] `SKILL.md` trimmed from 216 to 199 lines: "How it works" (raw CDP) moved to `references/recipes.md`; prose tightened, no behavior change.
+- 2026-11-22: [agent] Second Codex review fixes: env roots checked with `Path.is_absolute` (rejects drive-relative Windows paths).

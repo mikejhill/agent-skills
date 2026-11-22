@@ -48,4 +48,4 @@ node "<skill-dir>/scripts/<name>.mjs" <args>
 
 ## Larger CLIs
 
-Once a script needs persistent config, credentials, more than two subcommands, or more than about 300 lines, follow the `skill-cli-development` skill.
+Once a script needs persistent config, credentials, more than two subcommands, or more than about 300 lines, read [cli.md](cli.md).

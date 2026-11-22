@@ -14,6 +14,16 @@ incidents, status) faster than prose.
 6. Real content only: no placeholders or invented metrics.
 7. Standard Light / Auto / Dark theme switch on every report; Auto (follow OS) is the default.
 
+## Requirements
+
+- One self-contained `.html` file that works offline: libraries vendored and inlined, no CDNs, `fetch`, or web fonts.
+- Truly interactive, like a small site: a signature interactive, at least three interactive visuals, at least one what-if control, and linked views where data overlaps.
+- Answer first; visible prose stays short (captions, labels, tooltips).
+- Light / Auto / Dark theme switch on every report, Auto by default, persisted; charts re-colour on change.
+- Degrades without WebGL or JavaScript; works from 360px to desktop; respects reduced motion.
+- Estimates and schematic layouts are labelled; no invented data.
+- Build and lint scripts are stdlib-only Python.
+
 ## Log
 
 - 2026-11-08: [agent] Created skill: SKILL.md, references (recipes, components,
@@ -23,3 +33,4 @@ incidents, status) faster than prose.
   template, interactive-patterns/d3-recipes/three-recipes references, richness checks in the linter,
   and a new sample (3D pipeline, live chunking demo, linked what-if).
 - 2026-11-08: [agent] Standard Light/Auto/Dark switch (Auto default, pre-paint, persisted, R.theme API); linter enforces it.
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: shorter description, reference index with read-when triggers, script commands resolved from `<skill-dir>`, README, and a Requirements section reconstructed from the goals and log.

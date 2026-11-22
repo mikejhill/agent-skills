@@ -1,14 +1,17 @@
 ---
 name: browser-control
-description: Take control of the user's own running browser (Chrome, Edge, Brave) to do tasks in it with their real tabs, logins and sessions. Use whenever a task needs the user's browser - reading or extracting from pages they are signed in to, navigating, clicking, filling forms, running multi-step web workflows, pulling an app's JSON data, taking screenshots or PDFs - and for inspection work such as cookies, storage, network or console capture, and device emulation.
+description: >-
+  Control the user's own running Chrome, Edge, or Brave, with their real tabs
+  and logins: navigate, read, extract, click, fill forms, run multi-step web
+  tasks, capture screenshots or PDFs, and inspect cookies, network, or console.
+  Use whenever a task needs the user's browser.
 ---
 
 # Browser control
 
-Operate the user's real, already-open browser as they would: open tabs, navigate, read,
-click, type, and capture results, inside their existing logged-in sessions. Inspection
-(cookies, storage, network, console, emulation) is available when a task needs it, but the
-job is completing the task in the browser, not debugging it.
+Operate the user's real, already-open browser as they would, inside their logged-in sessions.
+Inspection (cookies, storage, network, console, emulation) is there when a task needs it, but
+the job is completing the task in the browser, not debugging it.
 
 `scripts/browser.py` (Python 3.8+, stdlib only) is the CLI. It talks to a **broker**: a
 windowless background process holding the **one** connection to the browser. The browser
@@ -20,9 +23,8 @@ closes.
 python scripts/browser.py <command> ...        # Windows: python or py -3; else python3
 ```
 
-Paths below are relative to this skill's directory. Output is compact JSON (`--pretty` to
-indent) except `text`, `net` and `body`, which print plain text. Errors go to stderr with
-exit code 2 (3 = browser control not enabled).
+Paths are relative to this skill. Output is compact JSON (`--pretty`) except `text`, `net`, `body`.
+Errors go to stderr, exit 2 (3 = browser control not enabled).
 
 ## Workflow
 
@@ -44,12 +46,9 @@ exit code 2 (3 = browser control not enabled).
    the match, then use the returned `id`. Otherwise `open URL --reuse` (reuses a tab
    already at that URL) or `open URL`. See *Existing tabs*.
 4. **Work:** act and read with `-t ID` (see *Working fast*).
-5. **Keep it running between tasks:** every new broker costs the user another approval
-   prompt, so don't `stop` just because one task finished. Run `browser.py stop` when the
-   user says they are done with the browser or asks to remove the "being controlled"
-   banner, or before switching to another browser. Otherwise the broker exits by itself
-   after 60 idle minutes (`start --idle SEC` or `BROWSER_CONTROL_IDLE` changes that; it
-   also updates a running broker).
+5. **Keep it running between tasks:** each new broker costs another approval. `stop` only when
+   the user is done, wants the "being controlled" banner gone, or before switching browsers.
+   Idle exit is 60 minutes (`start --idle SEC` or `BROWSER_CONTROL_IDLE`, also on a live broker).
 
 ## Existing tabs
 
@@ -65,9 +64,8 @@ opened first. `-t` selectors, best match first:
 | `url:/pull/`, `title:Inbox` | Substring of that field only |
 | `3F2A`, full id | Target id or unique prefix |
 
-Only the best-ranked group counts; if it holds several tabs the command fails and lists
-them (id, URL, title). Then use the id. `targets --grep S` filters the list,
-`targets --focus` adds `visible`/`focused` per tab.
+Only the best-ranked group counts; several tabs in it fail with a list (id, URL, title): use
+the id. `targets --grep S` filters, `targets --focus` adds `visible`/`focused`.
 
 Resolve once, then work by id: a URL selector stops matching after the tab navigates.
 `run -t SELECTOR` pins the tab itself.
@@ -172,10 +170,8 @@ Each tool call costs seconds of agent time; fixed sleeps cost more. So:
 **Target (`-t`)**: any selector from *Existing tabs*. Omit `-t` only for browser-wide
 commands (`Target.*`, `Browser.*`, `Storage.*`, `SystemInfo.*`).
 
-**Params**: `-p` avoids shell-quoting JSON (PowerShell mangles inline JSON). Values parse
-as JSON when possible (`*Id` keys stay strings unless integers), dotted keys nest:
-`send Emulation.setDeviceMetricsOverride -p width=390 -p height=844 -p deviceScaleFactor=3 -p mobile=true -t T`.
-Complex params: write a `.json` file and pass `@params.json`.
+**Params**: `-p k=v` avoids shell-quoting JSON. Values parse as JSON when possible (`*Id` keys
+stay strings unless integers); dotted keys nest; `@params.json` for complex ones.
 
 ## Rules
 
@@ -193,20 +189,11 @@ Complex params: write a `.json` file and pass `@params.json`.
   enable Network themselves). A restarted broker needs them again.
 - Large outputs: narrow with `--after`/`--grep` or filter in JS rather than dumping whole
   pages or event logs.
-
-## How it works
-
-The broker speaks the Chrome DevTools Protocol (CDP) over the browser's remote-debugging
-endpoint. That is an implementation detail; reach for it directly only through `send`,
-`events` and `batch` when no command covers the task. Method reference:
-<https://chromedevtools.github.io/devtools-protocol/> (tip-of-tree). Errors come back as
-`CDP error -32601/-32602 ...`.
+- `send`, `events` and `batch` expose the raw Chrome DevTools Protocol. Use them only when no
+  command covers the task.
 
 ## References
 
-- `references/recipes.md`: reading pages, waiting, multi-step runs, clicking/typing,
-  network/console capture, cookies and storage, screenshots/PDF, emulation, tabs, file
-  upload and downloads, iframes.
-- `references/troubleshooting.md`: detection, approval prompt, stale broker, logs,
-  launching a separate browser.
+- `references/recipes.md`: read for reading, waiting, multi-step runs, input, network and console, cookies, captures, emulation, uploads, iframes, and raw CDP via `send`/`events`/`batch`.
+- `references/troubleshooting.md`: read when detection, approval, or the broker fails.
 - `tests/smoke_test.py`: end-to-end check against a throwaway headless browser.

@@ -39,6 +39,7 @@ import collections
 import io
 import json
 import os
+import pathlib
 import secrets
 import socket
 import struct
@@ -331,16 +332,25 @@ def default_idle():
         return DEFAULT_IDLE
 
 
+def _abs_env(var, default):
+    v = os.environ.get(var, "")
+    # Path.is_absolute, not os.path.isabs: on Windows before Python 3.13, isabs accepts
+    # drive-relative "\\cache", which resolves differently per current drive.
+    return v if v and pathlib.Path(v).is_absolute() else default  # ignore relative values
+
+
 def state_dir():
+    """<user-cache>/agent-skills/browser-control, or $BROWSER_CONTROL_HOME/browser-control."""
     if os.environ.get("BROWSER_CONTROL_HOME"):  # isolate test brokers from the real one
-        base = os.environ["BROWSER_CONTROL_HOME"]
-    elif IS_WIN:
-        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
-    elif IS_MAC:
-        base = os.path.expanduser("~/Library/Caches")
+        d = os.path.join(os.environ["BROWSER_CONTROL_HOME"], "browser-control")
     else:
-        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    d = os.path.join(base, "browser-control")
+        if IS_WIN:
+            base = _abs_env("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
+        elif IS_MAC:
+            base = os.path.expanduser("~/Library/Caches")
+        else:
+            base = _abs_env("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+        d = os.path.join(base, "agent-skills", "browser-control")
     os.makedirs(d, exist_ok=True)
     return d
 

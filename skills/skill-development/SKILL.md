@@ -3,7 +3,7 @@ name: skill-development
 description: >-
   Standards for creating, revising, renaming, or reviewing agent skills (SKILL.md
   folders): naming, frontmatter, layout, progressive disclosure, README and
-  INTENT files, temp paths, and scripts. Use whenever you write or change a
+  INTENT files, temp paths, scripts, and CLIs. Use whenever you write or change a
   skill, or judge whether one is well built.
 ---
 
@@ -115,7 +115,7 @@ Name ephemeral files `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` using local time,
 - Scripts are non-interactive. They provide `--help`, write results to stdout (JSON when an agent parses them), write diagnostics to stderr, and exit non-zero on failure.
 - State OS limits in the script header and in `README.md`, and give the alternative for other OSes.
 
-Read [scripts.md](references/scripts.md) before writing or changing a script.
+Read [scripts.md](references/scripts.md) before writing or changing a script, and [cli.md](references/cli.md) for anything larger.
 
 ## Checklist
 
@@ -131,5 +131,6 @@ Read [scripts.md](references/scripts.md) before writing or changing a script.
 - [metadata.md](references/metadata.md): read when setting invocation flags, `compatibility`, or harness sidecar files.
 - [readme-and-intent.md](references/readme-and-intent.md): read when writing or updating `README.md` or `INTENT.md`.
 - [paths.md](references/paths.md): read when a skill writes files outside the user's working files.
-- [scripts.md](references/scripts.md): read when adding or changing a script or CLI.
+- [scripts.md](references/scripts.md): read when adding or changing a script.
+- [cli.md](references/cli.md): read when deciding whether a skill needs a CLI, or when a CLI needs config, credentials, subcommands, or more than about 300 lines.
 - [other-features.md](references/other-features.md): read when the work is an instruction file, prompt, agent definition, or `AGENTS.md`, not a skill.

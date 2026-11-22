@@ -11,6 +11,14 @@ Let the user end a session and start a fresh one without losing its goals, conte
 5. Writes to the user's temp directory on Windows, macOS, and Linux, and returns a link to the file.
 6. Efficient: compact enough to read in one pass, with no padding.
 
+## Requirements
+
+- User-invocable only, with an optional next-session focus argument.
+- Output goes to the platform temp directory, and the reply links to the file.
+- Covers session goals, key paths and URLs, critical context, steps taken, artifacts, blockers, and next steps.
+- Compact enough to read in one pass.
+- Keep the Codex `agents/openai.yaml` sidecar: it is the only way to enforce explicit-only invocation on Codex.
+
 ## Log
 
 - 2026-11-22: Created. User-invocable only, optional focus argument, output in the platform temp directory with a link.
@@ -20,3 +28,5 @@ Let the user end a session and start a fresh one without losing its goals, conte
 - 2026-11-22: [agent] Codex round 3 fixes, simplifying instead of adding layers: dropped `icacls` (trust the profile's owner-only ACL, roots must sit inside `%USERPROFILE%`); Unix roots must be user-owned and private or sticky; unwritable roots fall through to the next candidate while privacy failures stop; slug capped at 60 chars; Unix fallback uses `mktemp`. Threat model: a personal machine or single-user container; the goal is no accidental exposure or overwrite, not defense against a hostile local admin.
 - 2026-11-22: [agent] Codex round 4 fixes: Unix fallback binds `dir` before use; read-only, full, or denied roots (including at file creation) fall through to the next root; sticky roots must be owned by the user or root. Declined: verifying Windows ACLs under `%USERPROFILE%` (needs a deliberately misconfigured profile; outside the threat model above).
 - 2026-11-22: Keep `agents/openai.yaml` in the skill: an inert sidecar elsewhere and the only way to enforce explicit-only invocation on Codex. Harness sidecar files are acceptable; harness-specific content is not.
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: README added, Requirements section added from the goals and log. The handoff directory moved from `agent-handoffs` (Windows) and `agent-handoffs-<uid>` (Unix) to the standard `agent-skills\session-handoff` and `agent-skills-<uid>/session-handoff`, with both Unix levels created `0700` and checked, so this skill matches the path convention that `skill-development` cites it for. Older handoffs stay in the old folder.
+- 2026-11-22: [agent] Codex review fixes on the migration: the no-Python fallback verifies the parent directory before creating the child.

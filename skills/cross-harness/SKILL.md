@@ -1,6 +1,11 @@
 ---
 name: cross-harness
-description: Run a code review, prompt, or task in the other installed coding-agent CLI (Claude Code from Codex, or Codex from Claude Code) and collect its result, with bounded, self-cleaning processes. Use only when the user or their instructions explicitly ask to involve the other agent.
+description: >-
+  Run a code review, prompt, or task in the other coding-agent CLI (Codex from
+  Claude Code, or Claude Code from Codex) and collect the result, with bounded,
+  self-cleaning processes. Use only when the user or their instructions
+  explicitly ask to involve the other agent.
+compatibility: Claude Code or Codex, with the other agent's CLI installed and signed in. Python 3.8+.
 ---
 
 # Cross-harness

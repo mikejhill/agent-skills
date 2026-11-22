@@ -89,11 +89,19 @@ def state_home() -> Path:
     env = os.environ.get(HOME_ENV)
     if env:
         return Path(env).expanduser()
+    def abs_env(var: str, *fallback: str) -> Path:
+        v = os.environ.get(var, "")
+        if v and Path(v).is_absolute():  # ignore relative values
+            return Path(v)
+        return Path.home().joinpath(*fallback)  # resolve home only when needed
+
     if IS_WIN:
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "cross-harness"
-    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "cross-harness"
+        base = abs_env("LOCALAPPDATA", "AppData", "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = abs_env("XDG_CACHE_HOME", ".cache")
+    return base / "agent-skills" / "cross-harness"
 
 
 _JOBS_DIR = None
@@ -751,7 +759,7 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     """Where Codex writes its final message (-o): (path, scratch dir to remove or None).
 
     Codex 0.170+ opens the -o file with a strict no-follow open on Windows and has been
-    seen to reject paths under %LOCALAPPDATA%\\cross-harness with "path contains a
+    seen to reject paths under %LOCALAPPDATA%\\agent-skills\\cross-harness with "path contains a
     reparse point" although no component is a reparse point, while paths under
     %TEMP% work. So on Windows, Codex writes into a private temp dir and the result
     is moved into the job dir afterwards. Elsewhere it writes into the job dir.

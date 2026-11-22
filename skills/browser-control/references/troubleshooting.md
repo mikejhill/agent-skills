@@ -53,8 +53,9 @@ Custom port or profile: `--port N` (needs the classic `/json/version` endpoint).
 
 ## Broker internals
 
-- State: `%LOCALAPPDATA%\browser-control\broker.json` (Windows), `~/Library/Caches/browser-control`
-  (macOS), `~/.cache/browser-control` (Linux): port, random token, pid. Log: `broker.log` there.
+- State: `%LOCALAPPDATA%\agent-skills\browser-control\broker.json` (Windows),
+  `~/Library/Caches/agent-skills/browser-control` (macOS), `${XDG_CACHE_HOME:-~/.cache}/agent-skills/browser-control`
+  (Linux): port, random token, pid. Log: `broker.log` there.
 - Listens on `127.0.0.1` random port; every request must carry the token from the
   state file (other local users can't drive the browser).
 - Windows: spawned with `pythonw.exe` + `CREATE_NO_WINDOW | DETACHED_PROCESS`, so no console

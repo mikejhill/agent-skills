@@ -1,6 +1,10 @@
 ---
 name: html-report
-description: Build a single-file, self-contained, interactive HTML site that lets the reader explore a topic visually (charts, live widgets, simulations, 3D scenes) instead of reading about it. Use for design changes, project scope, implementation plans, research, decisions, incidents, status, explainers, or any "illustrate / show me / make a report" request, and whenever the work has structure (options, phases, data, systems, trade-offs) that a reader would grasp faster by manipulating it.
+description: >-
+  Build a single-file, offline, interactive HTML report (linked charts,
+  what-if controls, simulations, 3D scenes) that explains a topic visually. Use
+  for "show me", "illustrate", or "make a report" requests about plans,
+  designs, research, decisions, incidents, or status.
 ---
 
 # Interactive HTML Report
@@ -45,8 +49,8 @@ Include only what you use. A d3-only report is about 330 KB, and everything toge
 2. **Choose the signature interactive** (see `references/interactive-patterns.md`): the one experience that makes the topic click. Examples: a what-if model with sliders, a 3D system you orbit and click, a live algorithm demo, a scrubbable timeline, linked brushing across charts.
 3. **Pick the rest:** recipe per report type in `references/report-types.md`. d3 charts in `references/d3-recipes.md`, 3D in `references/three-recipes.md`, static components in `references/components.md`.
 4. **Write `report.src.html`** from `assets/template.html`. Keep the `<script data-vendor="…">` placeholders you need. Page code goes in the last `<script>`, after the helpers. Use the `R` runtime for tokens, theme changes, tooltips, the WebGL check, visibility and escaping.
-5. **Build:** `python scripts/build_report.py report.src.html report.html`
-6. **Verify:** `python scripts/check_report.py report.html`. Then, if any headless browser is available, load the page at 1280px and 390px in light and dark. Check for console errors, horizontal scroll, and blank canvases, and click every control once. Look at the screenshots and fix what's clipped, empty, cramped or unreadable.
+5. **Build:** `python3 "<skill-dir>/scripts/build_report.py" report.src.html report.html` (Windows: `py -3`).
+6. **Verify:** `python3 "<skill-dir>/scripts/check_report.py" report.html`. Then, if any headless browser is available, load the page at 1280px and 390px in light and dark. Check for console errors, horizontal scroll, and blank canvases, and click every control once. Look at the screenshots and fix what's clipped, empty, cramped or unreadable.
 7. **Deliver** the built file path plus a 1–3 line summary. Keep `.src.html` beside it for edits. Never paste HTML into chat.
 
 ## Design rules for visuals
@@ -71,16 +75,13 @@ Plan / risks / open questions (timeline, risk grid, accordions)
 Appendix: sources, assumptions, method
 ```
 
-## Files
+## References
 
-- `assets/template.html`: tokens, light/dark, components CSS, viz CSS (`.stage`, `.viz-grid`, `.control`, `.tip`), helpers (tabs, filters, sort, copy, expand) and the `R` runtime
-- `assets/vendor/`: `d3.min.js`, `three.min.js`, `lil-gui.min.js` (license headers kept)
-- `scripts/build_report.py`: inlines vendor placeholders into one file
-- `scripts/check_report.py`: lints self-containment, structure, visual density, interactivity, WebGL fallback, placeholders
-- `references/interactive-patterns.md`: signature interactives and linking patterns
-- `references/d3-recipes.md`: chart recipes (bar, line+brush, scatter+zoom, force, treemap, heatmap, unit chart)
-- `references/three-recipes.md`: scene boilerplate, picking, labels, instancing, 3D charts, camera tours
-- `references/report-types.md`: recipes per report type
-- `references/components.md`: static components (KPI, ask, tabs, diff, tables, timeline, risk grid…)
-- `references/design-system.md`, `references/checklist.md`
-- `examples/sample-report.html` (built) and `examples/sample-report.src.html` (source): 3D pipeline, live algorithm demo, linked what-if, d3 charts
+- [interactive-patterns.md](references/interactive-patterns.md): read when choosing the signature interactive or linking views.
+- [report-types.md](references/report-types.md): read when picking visuals for a report type.
+- [d3-recipes.md](references/d3-recipes.md): read when building a d3 chart (bar, line with brush, scatter with zoom, force, treemap, heatmap, unit chart).
+- [three-recipes.md](references/three-recipes.md): read when building a 3D scene (boilerplate, picking, labels, instancing, camera tours).
+- [components.md](references/components.md): read for static components (KPI, ask card, tabs, diff, tables, timeline, risk grid).
+- [design-system.md](references/design-system.md): read when styling or touching the theme switch.
+- [checklist.md](references/checklist.md): read before delivering.
+- `assets/template.html` (start here), `assets/vendor/` (inlined libraries), and `examples/sample-report.src.html` (a full example: 3D pipeline, live algorithm demo, linked what-if).

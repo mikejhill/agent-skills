@@ -18,7 +18,7 @@ from __future__ import annotations
 
 ## Object-Oriented Design
 
-STRONGLY prefer classes. A module is a home for one or a few cohesive classes, not a bag of functions.
+Prefer classes strongly. A module is a home for one or a few cohesive classes, not a bag of functions.
 
 ### Rules
 

@@ -1,6 +1,10 @@
 ---
 name: typescript-development
-description: Create, modify, refactor, or review TypeScript snippets, scripts, libraries, browser applications, Node.js services, and CLIs. Use for modular class-first design, strict boundary-safe typing, linting, testing, and portable package/runtime configuration.
+description: >-
+  TypeScript standards for snippets, scripts, libraries, browser apps, Node.js
+  services, and CLIs: class-first modules, strict typing, typed lint, pnpm,
+  module formats, and tests. Use when writing, refactoring, or reviewing
+  TypeScript.
 ---
 
 # TypeScript Development
@@ -21,7 +25,7 @@ Infer the smallest sufficient mode and target: Library, Browser, Service, or CLI
 
 **Design**
 
-- Strongly prefer classes for stateful services and application orchestration; use readonly value objects and narrow injected interfaces. Pure functions are appropriate for stateless transformations, parsers, and framework callbacks. Avoid artificial utility classes.
+- Prefer classes for stateful services and application orchestration; use readonly value objects and narrow injected interfaces. Pure functions are appropriate for stateless transformations, parsers, and framework callbacks. Avoid artificial utility classes.
 - Group by cohesive domain or feature. Keep domain logic independent of transport, filesystem, CLI, and framework adapters; wire implementations at the entry point. Prefer composition over inheritance.
 - Keep imports free of startup, network, and filesystem side effects. No shared module-level mutable state. Use early guards and shallow control flow; split a method before nesting exceeds three levels.
 - Validate external data once at each trust boundary, then enforce domain invariants where they belong. Keep parsing, I/O, and business logic separate.
