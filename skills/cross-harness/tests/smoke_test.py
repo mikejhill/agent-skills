@@ -27,6 +27,9 @@ WORK = TMP / "repo"
 WORK.mkdir()
 ENV = dict(os.environ, CROSS_HARNESS_HOME=str(TMP / "home"), FAKE_PIDS=str(TMP / "pids"))
 ENV.pop("CROSS_HARNESS_DEPTH", None)
+# Keep temp output dirs inside the test tree (tempfile checks TMPDIR first, also on Windows).
+(TMP / "t").mkdir()
+ENV.update(TMPDIR=str(TMP / "t"), TEMP=str(TMP / "t"), TMP=str(TMP / "t"))
 
 
 def fake_bin(flavor):
@@ -289,6 +292,21 @@ def _():
     assert not md.exists() or "progress:" not in md.read_text(), md.read_text()
 
 
+@case("stream recovery: empty final message fails; U+2028 stays in the answer")
+def _():
+    d = TMP / "parse"
+    d.mkdir()
+    msg = lambda t: json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": t}}, ensure_ascii=False)
+    done = json.dumps({"type": "turn.completed"})
+    log, out = d / "s.log", d / "r.md"
+    log.write_text("\n".join([msg("progress"), msg(""), done]) + "\n", encoding="utf-8")
+    xh.parse_outputs("codex", log, out)
+    assert not out.exists(), out.read_text()
+    log.write_text("\n".join([msg("progress"), msg("a\u2028b"), done]) + "\n", encoding="utf-8")
+    xh.parse_outputs("codex", log, out)
+    assert out.read_text(encoding="utf-8") == "a\u2028b", out.read_text(encoding="utf-8")
+
+
 @case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
 def _():
     saved = xh.IS_WIN
@@ -322,17 +340,25 @@ def _():
         xh.IS_WIN = saved
 
 
-@case("sweep reclaims temp output dirs left by finished jobs")
+@case("sweep reclaims only stale scratch dirs of finished or missing jobs")
 def _():
     jid = start("task", "-t", "codex", "hello")
     run("wait", jid, "--timeout", "30", check=0)
-    left = Path(tempfile.mkdtemp(prefix="xh-left-"))
-    p = TMP / "home" / "jobs" / jid / "job.json"
-    j = json.loads(p.read_text())
-    j.update(scratch=[str(left)], ended="2000-01-01T00:00:00+00:00")
-    p.write_text(json.dumps(j))
+    root = TMP / "t" / "cross-harness-out"
+    root.mkdir(exist_ok=True)
+    done = root / f"{jid}-result-abc123"
+    gone_job = root / "xh-20000101-000000-dead-fix-q_1"
+    fresh = root / f"{jid}-fix-new1"
+    other = root / "unrelated"
+    for d in (done, gone_job, fresh, other):
+        d.mkdir()
+        (d / "f").write_text("x")
+    old = time.time() - 3600
+    for d in (done, gone_job, other):
+        os.utime(d, (old, old))
     run("status", check=0)
-    assert not left.exists() and not job(jid).get("scratch"), job(jid)
+    assert not done.exists() and not gone_job.exists(), "stale dirs kept"
+    assert fresh.exists() and other.exists(), "fresh or unrelated dir removed"
 
 
 @case("no job holds the repo after completion")

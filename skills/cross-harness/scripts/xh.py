@@ -758,10 +758,50 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     if job["target"] != "codex" or not IS_WIN:
         return out_path, None
     try:
-        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-"))
+        root = scratch_root()
+        root.mkdir(parents=True, exist_ok=True)
+        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-", dir=root))
     except OSError:
         return out_path, None
     return scratch / out_path.name, scratch
+
+
+def scratch_root() -> Path:
+    """The only place scratch dirs live; sweep reclaims leftovers by scanning it."""
+    return Path(tempfile.gettempdir()) / "cross-harness-out"
+
+
+SCRATCH_NAME = re.compile(r"^(xh-\d{8}-\d{6}-[0-9a-f]{4})-(result|fix)-[A-Za-z0-9_]+$")
+
+
+def reclaim_scratch() -> None:
+    """Remove scratch dirs whose job is finished or gone.
+
+    A cancel, timeout or killed supervisor can end before its own cleanup. Only dirs
+    directly in scratch_root() whose names match SCRATCH_NAME are touched, and none
+    younger than a minute, so a starting or just-finished supervisor keeps its own.
+    """
+    root = scratch_root()
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return
+    for d in entries:
+        m = SCRATCH_NAME.match(d.name)
+        if not m or d.is_symlink() or not d.is_dir():
+            continue
+        try:
+            if time.time() - d.stat().st_mtime < 60:
+                continue
+        except OSError:
+            continue
+        p = jobs_dir() / m.group(1) / "job.json"
+        try:
+            status = json.loads(p.read_text(encoding="utf-8")).get("status") if p.is_file() else None
+        except (OSError, json.JSONDecodeError):
+            continue
+        if status not in ACTIVE:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def collect_output(cli_out: Path, out_path: Path, scratch):
@@ -794,7 +834,9 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
     if target == "codex":
         session, errors, last_message, final_message = None, [], None, None
         try:
-            for line in stdout_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            # Split on "\n" only: str.splitlines() also splits at U+2028/U+2029,
+            # which are legal unescaped inside JSON strings.
+            for line in stdout_path.read_text(encoding="utf-8", errors="replace").split("\n"):
                 line = line.strip()
                 if not line.startswith("{"):
                     continue
@@ -806,7 +848,7 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                 if typ in ("thread.started", "session.created", "session_configured"):
                     session = ev.get("thread_id") or ev.get("session_id") or session
                 elif typ == "item.completed" and (ev.get("item") or {}).get("type") == "agent_message":
-                    last_message = ev["item"].get("text") or last_message
+                    last_message = ev["item"].get("text") or ""
                 elif typ == "turn.completed":
                     final_message, last_message = last_message, None
                 elif typ in ("error", "turn.failed"):
@@ -819,10 +861,16 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
         # Fallback when Codex completed a turn but did not write the -o file. Only the
         # last message of a completed turn counts; a trailing progress update does not.
         if final_message and not errors and not (out_path.is_file() and out_path.stat().st_size > 0):
+            staging = out_path.with_name(out_path.name + ".partial")
             try:
-                out_path.write_text(final_message, encoding="utf-8")
-            except OSError:
-                pass
+                staging.write_text(final_message, encoding="utf-8")
+                os.replace(staging, out_path)
+            except OSError as e:
+                errors.append(f"could not write the recovered final message: {e}")
+                try:
+                    staging.unlink()
+                except OSError:
+                    pass
         if errors:
             fields["error"] = errors[-1]
     else:
@@ -888,8 +936,6 @@ def supervise(job_id: str) -> int:
         """Run one CLI step to completion. Returns parsed fields plus exit_code."""
         out_path, so_path, se_path = jdir / f"{prefix}.md", jdir / f"{prefix}.stdout.log", jdir / f"{prefix}.stderr.log"
         cli_out, scratch = codex_output_path(job, prefix, out_path)
-        if scratch:  # recorded so the lost-job sweep can reclaim it after a forced exit
-            update_job(job_id, scratch=[*(load_job(job_id).get("scratch") or []), str(scratch)])
         try:
             fields = _run_step(step, prompt, out_path, so_path, se_path, cli_out)
         except BaseException:
@@ -1009,27 +1055,11 @@ def spawn_supervisor(job_id: str) -> int:
 # --------------------------------------------------------------------------- sweep
 
 
-def reclaim_scratch(job: dict) -> None:
-    """Remove a finished job's temp output dirs (Windows Codex runs) that outlived it.
-
-    A cancel, timeout or forced exit can end the supervisor before its own cleanup.
-    """
-    dirs = job.get("scratch") or []
-    if not dirs or time.time() - parse_iso(job.get("ended", "")) < 60:
-        return  # give a just-finished supervisor time to finish its own cleanup and writes
-    for d in dirs:
-        shutil.rmtree(d, ignore_errors=True)
-    left = [d for d in dirs if Path(d).exists()]
-    if left != dirs:
-        update_job(job["id"], scratch=left or None)
-
-
 def sweep(kill: bool = True) -> list:
     """Mark jobs whose supervisor vanished as lost and end leftover trees."""
     changed = []
     for job in all_jobs():
         if job.get("status") not in ACTIVE:
-            reclaim_scratch(job)
             continue
         sup = job.get("supervisor") or {}
         if sup and alive(sup.get("pid"), sup.get("start")):
@@ -1049,10 +1079,10 @@ def sweep(kill: bool = True) -> list:
                 # The group leader may be gone (Linux parent-death signal) while
                 # members it started remain. The group id is the leader's pid.
                 killed = kill_group(ch.get("pid"))
-        reclaim_scratch(job)
         update_job(job["id"], status="lost", ended=now_iso(),
                    reason="supervisor exited without finishing" + ("; ended leftover processes" if killed else ""))
         changed.append(job["id"])
+    reclaim_scratch()
     return changed
 
 
