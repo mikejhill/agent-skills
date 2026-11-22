@@ -25,7 +25,7 @@ Produce CLI tools bundled with agent skills that provide deterministic, secure, 
 **Out-of-scope:**
 
 - Standalone CLI tools not bundled with a skill
-- Language-specific coding standards (defer to python-development, typescript-development, bash-scripting skills)
+- Language-specific coding standards (defer to python-development, typescript-development, shell-scripts skills)
 - CI/CD pipeline configuration
 - Web application or library development
 
@@ -106,7 +106,7 @@ A skill CLI has a **single responsibility**: provide one cohesive domain operati
 | 3 | **Bash** | Trivial wrappers (<50 lines) delegating entirely to existing CLI tools. Unix-only. |
 | 4 | **PowerShell** | Windows-specific system integration with no cross-platform alternative. |
 
-Follow the **python-development** skill for Python conventions. Follow the **typescript-development** skill for Node.js/TypeScript conventions. Follow the **bash-scripting** or **powershell-scripting** skill for shell scripts.
+Follow the **python-development** skill for Python conventions. Follow the **typescript-development** skill for Node.js/TypeScript conventions. Follow the **shell-scripts** skill for shell scripts.
 
 ## Complexity Tiers
 

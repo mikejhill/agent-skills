@@ -1,8 +1,3 @@
-# Bash Script Templates
-
-## FullScript Skeleton
-
-```bash
 #!/usr/bin/env bash
 #
 # Does something useful with the given target.
@@ -11,7 +6,7 @@
 #        example-script -h
 #
 # Changelog:
-#   - 2025-01-01: Initial version.
+#   - YYYY-MM-DD: Initial version.
 
 set -euo pipefail
 
@@ -23,7 +18,8 @@ readonly E_USAGE=2
 readonly E_NOT_FOUND=3
 readonly E_INTERRUPT=130
 readonly E_TERMINATED=143
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 readonly DEFAULT_LIMIT=10
 
 # ---------------------------------------------------------------------------
@@ -86,7 +82,9 @@ process() {
 	local path="$1"
 	[ -e "${path}" ] || die "Path not found: ${path}" "${E_NOT_FOUND}"
 
-	[ "${verbose}" -eq 1 ] && log_info "Processing: ${path}"
+	if [ "${verbose}" -eq 1 ]; then
+		log_info "Processing ${path} (limit ${limit})"
+	fi
 
 	# ... domain logic ...
 }
@@ -107,10 +105,15 @@ parse_args() {
 	done
 	shift $((OPTIND - 1))
 
-	[ $# -lt 1 ] && { usage >&2; exit "${E_USAGE}"; }
+	if [ $# -lt 1 ]; then
+		usage >&2
+		exit "${E_USAGE}"
+	fi
 	target="$1"
 	shift
-	[ $# -gt 0 ] && die "Unexpected arguments: $*" "${E_USAGE}"
+	if [ $# -gt 0 ]; then
+		die "Unexpected arguments: $*" "${E_USAGE}"
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -126,53 +129,3 @@ trap _on_interrupt INT
 trap _on_terminate TERM
 
 main "$@"
-```
-
----
-
-## Temp File Pattern
-
-Use when the script creates intermediate files that must be cleaned up on any exit path:
-
-```bash
-# Add to script state section:
-tmp_file=""
-
-# Replace the no-op cleanup:
-cleanup() {
-	[ -n "${tmp_file}" ] && rm -f "${tmp_file}"
-}
-
-# Inside a business logic function:
-prepare_data() {
-	local source="$1"
-	tmp_file="$(mktemp)"
-	# Work with "${tmp_file}" ...
-}
-```
-
----
-
-## One-Off Templates
-
-**Find and remove old files:**
-
-```bash
-# Preview files that would be removed (dry run):
-find . -type f -name "*.log" -mtime +7 -print
-
-# Remove after confirming the list above:
-# find . -type f -name "*.log" -mtime +7 -exec rm -f {} +
-```
-
-**Summarize file sizes by extension:**
-
-```bash
-find . -type f | awk -F/ '{print $NF}' | awk -F. 'NF>1 {print $NF} NF==1 {print "[no-ext]"}' | sort | uniq -c | sort -rn
-```
-
-**Extract unique values from a CSV column (simple/unquoted CSV):**
-
-```bash
-awk -F, 'NR>1 {print $2}' data.csv | sort -u
-```

@@ -12,6 +12,17 @@ Codify Python development standards — from one-off snippets to packaged CLI to
 6. Templates are copy-paste ready and pass `uv run poe check` unmodified
 7. Progressive discovery: SKILL.md holds the always-on rules; topic references load on demand
 
+## Requirements
+
+- Three modes: OneOff (inline), Script (single-file PEP 723 run with `uv run`), FullProject (packaged, `src/<package>/`).
+- Toolchain: uv for Python versions, environments, dependencies, locking, and running; ruff for linting and formatting; ty with every rule set to error; poe for tasks. No pip, venv, poetry, or `requirements.txt`. All tool config in `pyproject.toml`.
+- Strongly class-based: behaviour in methods; module-level functions only where a tool requires them (pytest fixtures); entry points are classmethods.
+- Every file, class, and method has a concise docstring. Comments are short logical headers, not inline narration.
+- Strict typing: annotate everything, no `Any`, no bare `type: ignore`; convert untyped boundaries to typed dataclasses.
+- Specific exceptions under one `AppError` hierarchy; logging to stderr, program output to stdout.
+- pytest tests with a coverage gate; `uv run poe check` passes before delivery.
+- Templates are copy-paste ready and pass `uv run poe check` unmodified.
+
 ## Log
 
 - 2026-03-15: Created skill targeting Python CLI tools and automation scripts
@@ -30,3 +41,4 @@ Codify Python development standards — from one-off snippets to packaged CLI to
   into project-setup, code-standards, cli, and testing references for
   progressive discovery. Templates verified with ruff 0.16.10, ty 0.0.84,
   uv 0.11.32
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: shorter description, README added, and a Requirements section reconstructed from the goals and log above. No rule changes.

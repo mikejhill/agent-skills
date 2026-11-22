@@ -1,8 +1,3 @@
-# PowerShell Templates
-
-## Full Script Skeleton
-
-```powershell
 <#
 .SYNOPSIS
 Process items under a path.
@@ -18,8 +13,8 @@ Path to process.
 [object] Results produced by the processor.
 
 .EXAMPLE
-.\Example.ps1 -InputPath "C:\\Data"
-Processes items under C:\\Data.
+.\Example.ps1 -InputPath "C:\Data"
+Processes items under C:\Data.
 
 .NOTES
 Use for reusable automation. Requires read access to InputPath.
@@ -38,11 +33,11 @@ Set-StrictMode -Version Latest
 [string]$ScriptVersion = "1.0.0"
 #endregion Constants
 
+#region Classes
 <#
 .SYNOPSIS
 Example class with documented behavior.
 #>
-#region Classes
 class ExampleProcessor {
   [string]$InputPath
 
@@ -71,6 +66,10 @@ class ExampleProcessor {
 }
 #endregion Classes
 
+#region HelperFunctions
+# Helper functions (orchestration only)
+#endregion HelperFunctions
+
 #region Main
 function Main {
   param(
@@ -85,10 +84,3 @@ function Main {
 
 Main @PSBoundParameters
 #endregion Main
-```
-
-## One-Off Template
-
-```powershell
-Get-ChildItem -Path $Path -File | Sort-Object Length -Descending | Select-Object -First 5 FullName, Length
-```

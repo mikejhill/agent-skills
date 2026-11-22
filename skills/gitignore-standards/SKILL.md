@@ -1,82 +1,38 @@
 ---
 name: gitignore-standards
-description: Use for all .gitignore tasks. Apply these standards whenever creating, updating, reviewing, or refactoring .gitignore content.
+description: >-
+  Standard layout for .gitignore files: the base template, unaltered
+  github/gitignore templates, then one project-specific section. Use when
+  creating, updating, reviewing, or refactoring any .gitignore.
 ---
 
-# GitIgnore Standards Skill
+# Gitignore standards
 
-## Objective
-
-Produce and maintain `.gitignore` content with exactly three section groups in this order:
-
-1. Base template reference
-2. One or more unaltered GitHub gitignore templates
-3. One project-specific rules section
-
-## Base .gitignore Template Reference
-
-Use the canonical base template file at [references/base-gitignore-template.gitignore](./references/base-gitignore-template.gitignore).
-
-## Required Structure
-
-Use this exact section order and heading format:
+Every `.gitignore` has three section groups, in this order, separated by one blank line:
 
 ```gitignore
 ### Base Template
-<unaltered content from ./references/base-gitignore-template.gitignore>
+<assets/base.gitignore, copied unaltered>
 
 ### <Name> Template
-<unaltered content from github/gitignore>
-
-### <Name> Template
-<unaltered content from github/gitignore>
+<a github/gitignore template, copied unaltered>
 
 ### Project-Specific Rules
-<custom project patterns>
-```
-
-## Complete Example (Trimmed)
-
-This is a concise end-to-end example with multiple template sections and short content excerpts:
-
-```gitignore
-### Base Template
-# Agent and Developer Temporary Files
-.tmp/
-
-### Python Template
-__pycache__/
-*.py[cod]
-.venv/
-
-### Terraform Template
-.terraform/
-*.tfstate
-*.tfstate.*
-
-### Project-Specific Rules
-# Repository-specific additions
-coverage-final/
-terraform.local.tfvars
-!.env.production.template
+<everything this project adds or overrides>
 ```
 
 ## Rules
 
-- Apply this skill to every `.gitignore` task: create, update, review, and refactor.
-- The base template section MUST copy unaltered content from [Base .gitignore Template](./references/base-gitignore-template.gitignore) into the generated output.
-- Each imported GitHub template section MUST start with exactly one heading line in this format: `### <Name> Template`.
-- Imported GitHub templates MUST remain unaltered from their original source text.
-- There MUST be exactly one `### Project-Specific Rules` section.
-- Put all project-specific additions or overrides in `### Project-Specific Rules`, including re-adding any desired patterns ignored by earlier templates.
-- Separate sections with exactly one blank line.
-- Do not add extra section types.
+- Copy [base.gitignore](assets/base.gitignore) verbatim, including its `### Base Template` heading.
+- Add one section per template from [github/gitignore](https://github.com/github/gitignore) (for example `Python`, `Node`, `Terraform`), headed `### <Name> Template`. Fetch the current upstream text and do not edit it. Omit templates the project does not need.
+- Put every custom pattern, override, and re-include (`!pattern`) in the single `### Project-Specific Rules` section, last. Comment non-obvious patterns.
+- Add no other section types.
+- When updating an existing file, move stray custom lines into Project-Specific Rules, and replace edited template copies with the upstream text.
 
-## Validation Checklist
+## Checklist
 
-- Order is Base -> GitHub templates -> Project-Specific Rules.
-- Base template content is copied unaltered from [references/base-gitignore-template.gitignore](./references/base-gitignore-template.gitignore) and embedded inline.
-- Every GitHub template has a `### <Name> Template` heading.
-- GitHub template text is unmodified.
-- Only one `### Project-Specific Rules` section exists.
-- Exactly one blank line separates adjacent sections.
+- [ ] Order: Base, then templates, then Project-Specific Rules.
+- [ ] Base and template sections match their sources exactly.
+- [ ] Exactly one Project-Specific Rules section.
+- [ ] One blank line between sections.
+- [ ] `git status --ignored` shows nothing unexpected ignored or tracked.

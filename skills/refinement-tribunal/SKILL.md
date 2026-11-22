@@ -751,7 +751,7 @@ Failure conditions take precedence over pass conditions when both apply:
 
 ### Example 1 — Refining a Agent Skill
 
-**User input**: `/refinement-tribunal skills/testing-standards/SKILL.md`
+**User input**: `/refinement-tribunal skills/test-design/SKILL.md`
 
 **Phase 1 — Preparation**:
 

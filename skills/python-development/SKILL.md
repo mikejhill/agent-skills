@@ -1,11 +1,14 @@
 ---
 name: python-development
-description: Use when creating, modifying, refactoring, or reviewing Python code — one-off snippets, single-file uv scripts, or packaged projects. Enforces the Astral toolchain (uv, ruff, ty with strict type checking), poe task runners, src/<package>/ layout, class-based OOP design, file/class/method docstrings, concise comments, structured logging, and pytest testing.
+description: >-
+  Python standards for snippets, PEP 723 scripts, and packaged projects: uv,
+  ruff, strict ty, poe, src layout, class-based design, docstrings, logging,
+  and pytest. Use when writing, refactoring, or reviewing Python code.
 ---
 
 # Python Development
 
-Produce Python in one of three modes. This file holds the rules that always apply; load the reference files listed under [Progressive Discovery](#progressive-discovery) only when the task needs them.
+Produce Python in one of three modes. This file holds the rules that always apply; load the references only when the task needs them.
 
 ## Modes
 
@@ -33,7 +36,7 @@ Default to **FullProject** when ambiguous. Details and guardrails: [references/m
 
 **Design**
 
-- STRONGLY prefer classes. Put behaviour in methods; avoid module-level functions.
+- Prefer classes strongly. Put behaviour in methods; avoid module-level functions.
 - The only accepted module-level functions are pytest fixtures in `conftest.py`. Entry points are classmethods (`package.__main__:Application.main`).
 - `@dataclass(frozen=True, slots=True)` for configuration and value objects; regular classes for stateful services.
 - No module-level mutable state; module level holds only imports, constants, `logger`, and class definitions.
@@ -67,9 +70,7 @@ Default to **FullProject** when ambiguous. Details and guardrails: [references/m
 5. Write tests following [testing.md](references/testing.md).
 6. Verify: `uv run poe fix` then `uv run poe check` (FullProject), or the script commands in [modes.md](references/modes.md). Fix every finding before delivering; never weaken tool config to make it pass.
 
-## Progressive Discovery
-
-Read only what the task needs:
+## References
 
 | Read | When |
 | --- | --- |
