@@ -27,7 +27,7 @@ import time
 
 IS_WIN = os.name == "nt"
 CACHE_VERSION = 1
-CLOSE_MS = 150  # differences below this are noise next to ~1 s of harness overhead per call
+CLOSE_MS = 150  # differences below this are small next to model and harness time per call
 
 
 def cache_path():
@@ -61,20 +61,21 @@ def win_bash():
 def candidates():
     """(name, family, argv) for each shell found. argv runs an empty command."""
     out = []
-    if IS_WIN:
-        b = win_bash()
-        if b:
-            out.append(("bash", "posix", [b, "-c", "true"]))
-    else:
-        for name in ("bash", "zsh"):  # what agent shell tools run (not sh)
-            p = shutil.which(name)
-            if p:
-                out.append((name, "posix", [p, "-c", "true"]))
+    posix = [("bash", win_bash())] if IS_WIN else [(n, shutil.which(n)) for n in ("bash", "zsh")]
+    for name, p in posix:  # what agent shell tools run (not sh)
+        if p:
+            out.append((name, "posix", [p, "-c", "true"]))
+            out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
+    # Windows PowerShell 5.1 only stands in when pwsh 7 is missing: agent tools run pwsh, and
+    # 5.1 lacks `&&`, ternaries and UTF-8 defaults, so a faster 5.1 start is no reason to use it.
+    pw = shutil.which("pwsh")
     for name in ("pwsh", "powershell") if IS_WIN else ("pwsh",):
         p = shutil.which(name)
         if p:
-            out.append((name, "powershell", [p, "-NoProfile", "-NonInteractive", "-Command", "exit"]))
-            out.append((name + " (profile)", "powershell-profile", [p, "-NonInteractive", "-Command", "exit"]))
+            fam = "powershell" if name == "pwsh" or not pw else "powershell-5"
+            out.append((name, fam, [p, "-NoProfile", "-NonInteractive", "-Command", "exit"]))
+            out.append((name + " (profile)", "powershell-profile" if fam == "powershell" else "powershell-5-profile",
+                        [p, "-NonInteractive", "-Command", "exit"]))
     if IS_WIN:
         p = shutil.which("cmd")
         if p:
@@ -121,6 +122,9 @@ def recommend(shells):
         r["recommendation"] = "only %s found: nothing to choose" % (px or ps)[1]
     else:
         r["recommendation"] = "no shell found"
+    login = best("posix-login")
+    if px and login and login[0] - px[0] >= CLOSE_MS:
+        r["login_cost_ms"] = login[0] - px[0]
     return r
 
 

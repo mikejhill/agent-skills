@@ -38,6 +38,16 @@ class Recommend(unittest.TestCase):
                           **sh("pwsh (profile)", "powershell-profile", 1400)})
         self.assertEqual(r["profile_cost_ms"], 1050)
 
+    def test_powershell_5_is_not_the_comparison(self):  # 5.1 starts faster than pwsh 7 on Windows
+        r = sp.recommend({**sh("bash", "posix", 74), **sh("pwsh", "powershell", 245),
+                          **sh("powershell", "powershell-5", 178)})
+        self.assertEqual(r["fastest_powershell"], "pwsh")
+        self.assertIn("prefer bash", r["recommendation"])
+
+    def test_login_cost_reported(self):
+        r = sp.recommend({**sh("bash", "posix", 60), **sh("bash (login)", "posix-login", 675)})
+        self.assertEqual(r["login_cost_ms"], 615)
+
     def test_single_family(self):
         r = sp.recommend(sh("bash", "posix", 5))
         self.assertIn("nothing to choose", r["recommendation"])

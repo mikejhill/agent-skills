@@ -22,4 +22,7 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   Operator asked to account for environment-dependent shell performance: Git Bash may
   start slower than PowerShell on other machines. Added `scripts/shell_probe.py` (per-shell
   median/p90 startup, profile cost, 30-day per-host cache, 150 ms "either" threshold) and
-  unit tests.
+  unit tests. Windows check on a real laptop: compare against pwsh 7, not the faster-starting
+  Windows PowerShell 5.1 (it had hidden a 171 ms Git Bash vs pwsh gap); report login-shell
+  cost; per-process costs in Git Bash and per-process module loads in PowerShell; harness
+  overhead can differ per shell.

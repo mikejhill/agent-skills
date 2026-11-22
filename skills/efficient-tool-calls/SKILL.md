@@ -5,11 +5,12 @@ description: Cut the fixed cost of agent tool calls on multi-step work (browser 
 
 # Efficient tool calls
 
-Every tool call has a fixed cost before the command does anything: the model writes the
-call and reads the result (about 3–4 s of model time per turn, growing ~0.3 s per 100
-characters of command), and the harness usually spawns a fresh shell for it (about 1 s,
-more for a slow shell). On a 50-call task that fixed cost is minutes. Spend fewer, better
-calls.
+Every tool call has a fixed cost before the command does anything. The model writes the
+call and reads the result: in one study, about 4 s of model time per turn, growing ~0.3 s
+per 100 characters of command (rough figures; they vary by model and harness). The
+harness then runs it, usually in a freshly started shell: 0.1–0.3 s for the shell itself,
+and up to ~1 s per call end to end in that study. On a 50-call task the fixed cost is
+minutes. Spend fewer, better calls.
 
 ## Rules
 
@@ -28,7 +29,13 @@ calls.
    command, or the harness's background/notification feature.
 6. **Reuse long-lived helpers.** Prefer a running daemon, broker, or REPL that a tool
    keeps alive over starting one per call.
-7. **Use the faster shell for general work** (below).
+7. **Mind per-process costs on Windows.** Every extra process in Git Bash costs ~30–40 ms:
+   prefer one `grep`/`sed`/`awk` or a short script over long pipelines and `$(...)` loops.
+   In PowerShell, the first CIM or web cmdlet in a process loads its module (~0.5–1 s), so
+   batch that kind of work into one call.
+8. **Avoid login shells** (`bash -l`) unless you need the profile: on one Windows machine
+   Git Bash took 675 ms as a login shell and 60 ms without.
+9. **Use the faster shell for general work** (below).
 
 ## Choosing a shell
 
@@ -44,11 +51,15 @@ python scripts/shell_probe.py          # Windows: python or py -3; else python3
 - It times an empty command in each shell found (bash or zsh, `pwsh`, Windows
   PowerShell, `cmd`), 5 runs after a warm-up, and prints JSON with `median_ms` per
   shell, `fastest_posix`, `fastest_powershell`, and a `recommendation`.
+- It compares against PowerShell 7 (`pwsh`) when installed. Windows PowerShell 5.1 often
+  starts faster but lacks `&&`, ternaries and UTF-8 defaults; it is reported for
+  information only, and isn't a reason to switch.
 - The result is cached per machine for 30 days, so later calls return at once
   (`"cached": true`). `--force` re-measures; re-measure after installing or upgrading a
   shell, changing antivirus, or when calls feel slower than the cached numbers say.
-- `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more.
-  That matters only if your harness loads the profile for each call.
+- `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more, and
+  `login_cost_ms` when a login shell does. They matter only if your harness loads the
+  profile for each call.
 
 Then:
 
@@ -60,9 +71,10 @@ Then:
 | Work only one shell does well | Use that shell regardless: cmdlets, the registry, .NET and CIM objects in PowerShell; pipes through `grep`/`sed`/`awk` in a POSIX shell |
 | Python is not available | Time one empty call per shell by hand (`time bash -c true`; `Measure-Command { pwsh -NoProfile -c exit }`) and apply the same rule |
 
-The probe measures shell startup only. The harness adds its own fixed time per call on
-top of it, the same for each shell, so the difference between shells is what the probe
-reports.
+The probe measures bare shell startup. A harness adds its own time per call, and it can
+differ per shell (one launches PowerShell through an extra `cmd.exe` hop, ~85 ms; another
+sources an environment snapshot in bash, ~15 ms). When the probe says `either`, or the
+gap is near 150 ms, time one trivial call through each tool before deciding.
 
 Don't switch shells in the middle of a dependent sequence to save a few hundred
 milliseconds; quoting and path differences cost more than they save.
