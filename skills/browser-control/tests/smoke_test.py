@@ -229,7 +229,10 @@ def main():
         # The fixture stamps window.lateAt (epoch ms) when it inserts the text. Measure from that
         # event to the CLI's return; the 0.5 s budget is the 0.3 s poll target plus process exit.
         _, at, _ = r.cli("eval", "window.lateAt", "-t", tid)
-        latency = done - float(at or "nan") / 1000
+        try:
+            latency = done - float(json.loads(at)) / 1000
+        except (TypeError, ValueError):  # no stamp: the text never appeared
+            latency = float("nan")
         r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and
                 res.get("waited", 0) > 0.2 and 0 <= latency < 0.5 and "settle" not in res,
                 "latency %.2f s; " % latency + o + e)

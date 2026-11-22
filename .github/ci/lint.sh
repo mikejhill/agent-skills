@@ -20,17 +20,27 @@ shell_files() {
   } | sort -u
 }
 
+# Bash 3.2 (macOS default) has no mapfile, so fill arrays with a read loop.
 # shellcheck disable=SC2329
 run_shellcheck() {
-  local files
-  mapfile -t files < <(shell_files)
+  local files=() f
+  while IFS= read -r f; do files+=("$f"); done < <(shell_files)
   echo "shellcheck: ${#files[@]} file(s)"
   [ "${#files[@]}" -eq 0 ] || shellcheck --format=gcc "${files[@]}"
+}
+
+# Tracked files only, so ignored scratch folders locally do not change the result.
+# shellcheck disable=SC2329
+run_yamllint() {
+  local files=() f
+  while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.yml' '*.yaml')
+  echo "yamllint: ${#files[@]} file(s)"
+  [ "${#files[@]}" -eq 0 ] || yamllint --strict "${files[@]}"
 }
 
 step ruff ruff check --output-format="${RUFF_FORMAT:-full}" .
 step shellcheck run_shellcheck
 step PSScriptAnalyzer pwsh -NoProfile -File .github/ci/psscriptanalyzer.ps1
-step yamllint yamllint --strict .
+step yamllint run_yamllint
 step actionlint actionlint
 exit "$status"

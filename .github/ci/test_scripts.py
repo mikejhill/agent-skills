@@ -39,7 +39,9 @@ def run_tree(*args: str | Path, timeout: int, cwd: Path) -> subprocess.Completed
     """Run a long smoke script in its own process group; on timeout, kill the whole tree.
 
     Output goes to files, not pipes, so a leftover grandchild holding an inherited handle
-    cannot block the wait after the kill.
+    cannot block the wait after the kill. Brokers and supervisors that the scripts start in
+    their own sessions are outside the group; the scripts stop them in their own cleanup, and
+    CI runners are discarded after the job.
     """
     with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as out, \
             tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as err:
@@ -55,7 +57,7 @@ def run_tree(*args: str | Path, timeout: int, cwd: Path) -> subprocess.Completed
                 os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(30)
             out.seek(0)
-            pytest.fail(f"timed out after {timeout} s; process tree killed\n{out.read()}")
+            pytest.fail(f"timed out after {timeout} s; process group killed\n{out.read()}")
         out.seek(0)
         err.seek(0)
         return subprocess.CompletedProcess(args, code, out.read(), err.read())
