@@ -16,7 +16,7 @@ minutes. Spend fewer, better calls.
 
 1. **Batch predictable steps.** Put steps whose outcome you can predict in one call.
    Chain dependent steps with `&&` (PowerShell 7: `&&`; Windows PowerShell 5: `;` plus
-   `if ($?)`). Run independent reads in parallel if your harness allows several tool
+   `if ($LASTEXITCODE -eq 0)` after native commands). Run independent reads in parallel if your harness allows several tool
    calls at once. Stop batching at a point where you need to look at the result to decide,
    and before any step the user must confirm.
 2. **Keep commands short.** Call a script file instead of pasting long inline code; reuse
@@ -73,8 +73,10 @@ Then:
 
 The probe measures bare shell startup. A harness adds its own time per call, and it can
 differ per shell (one launches PowerShell through an extra `cmd.exe` hop, ~85 ms; another
-sources an environment snapshot in bash, ~15 ms). When the probe says `either`, or the
-gap is near 150 ms, time one trivial call through each tool before deciding.
+sources an environment snapshot in bash, ~15 ms). You can't time a tool call
+yourself (the wall time you see includes model latency), so when the probe says `either`
+or the gap is near 150 ms, use a per-call time your harness reports if it shows one;
+otherwise pick by task.
 
 Don't switch shells in the middle of a dependent sequence to save a few hundred
 milliseconds; quoting and path differences cost more than they save.
