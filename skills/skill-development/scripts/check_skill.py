@@ -32,50 +32,159 @@ DESC_WARN = 300
 DESC_MAX = 1024
 
 
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str | None]:
-    """Return (top-level keys -> raw scalar text, error) for a SKILL.md."""
+STRING_KEYS = ("name", "description", "license", "compatibility", "argument-hint")
+BOOL_KEYS = ("disable-model-invocation", "user-invocable")
+
+
+def split_frontmatter(text: str) -> tuple[str | None, str | None]:
+    """Return (frontmatter source, error) for a SKILL.md."""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
-        return {}, "SKILL.md does not start with '---' frontmatter"
-    try:
-        end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
-    except StopIteration:
-        return {}, "frontmatter has no closing '---'"
-    fields: dict[str, str] = {}
-    key = None
-    for line in lines[1:end]:
+        return None, "SKILL.md does not start with '---' frontmatter"
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "\n".join(lines[1:i]), None
+    return None, "frontmatter has no closing '---'"
+
+
+def _plain_scalar(raw: str) -> tuple[object, str | None]:
+    """Interpret one single-line YAML scalar the way a YAML loader would."""
+    if raw[:1] in ("'", '"'):
+        q = raw[0]
+        close = raw.find(q, 1)
+        while q == "'" and close != -1 and raw[close + 1:close + 2] == "'":
+            close = raw.find(q, close + 2)
+        if close == -1:
+            return None, "unterminated quoted string"
+        rest = raw[close + 1:].strip()
+        if rest and not rest.startswith("#"):
+            return None, "text after a quoted string"
+        body = raw[1:close]
+        return (body.replace("''", "'") if q == "'" else body), None
+    value = re.split(r"\s#", raw, maxsplit=1)[0].strip()
+    if value[:1] in ("[", "{"):
+        return value, "is a YAML collection, not a string"
+    if value[:1] in ("&", "*", "!", "%", "@", "`", "|", ">"):
+        return None, f"starts with the YAML indicator '{value[0]}'"
+    if ": " in value or value.endswith(":"):
+        return None, "contains ': ' (quote it or use a '>-' block)"
+    if value in ("true", "false"):
+        return value == "true", None
+    return value, None
+
+
+def parse_frontmatter_subset(src: str) -> tuple[dict[str, object], str | None]:
+    """Strict parser for the YAML subset skills use, when PyYAML is absent."""
+    fields: dict[str, object] = {}
+    lines = src.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
-        if m and not line[0].isspace():
-            key, value = m.group(1), m.group(2).strip()
-            if key in fields:
-                return fields, f"duplicate frontmatter key '{key}'"
-            fields[key] = "" if value in (">", ">-", "|", "|-") else value
-        elif key is not None and line[0].isspace():
-            fields[key] = (fields[key] + " " + line.strip()).strip()
-        else:
+        m = re.match(r"^([A-Za-z0-9_-]+):(?:\s+(.*))?$", line)
+        if not m:
             return fields, f"cannot parse frontmatter line: {line!r}"
-    for k, v in fields.items():
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-            fields[k] = v[1:-1]
+        key, raw = m.group(1), (m.group(2) or "").strip()
+        if key in fields:
+            return fields, f"duplicate frontmatter key '{key}'"
+        block: list[str] = []
+        while i < len(lines) and (not lines[i].strip() or lines[i][0].isspace()):
+            block.append(lines[i])
+            i += 1
+        if re.match(r"^[>|][+-]?(\s+#.*)?$", raw):
+            parts = [b.strip() for b in block]
+            fields[key] = (" " if raw[0] == ">" else "\n").join(p for p in parts if p)
+        elif raw:
+            if any(b.strip() for b in block):
+                return fields, f"'{key}' has a value and indented lines"
+            value, err = _plain_scalar(raw)
+            if err:
+                return fields, f"'{key}' {err}"
+            fields[key] = value
+        else:
+            sub: dict[str, object] = {}
+            for b in block:
+                if not b.strip() or b.lstrip().startswith("#"):
+                    continue
+                sm = re.match(r"^\s+([A-Za-z0-9_.-]+):\s+(.*)$", b)
+                if not sm:
+                    return fields, f"cannot parse frontmatter line: {b!r}"
+                value, err = _plain_scalar(sm.group(2).strip())
+                if err:
+                    return fields, f"'{key}.{sm.group(1)}' {err}"
+                sub[sm.group(1)] = value
+            fields[key] = sub
     return fields, None
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, object], str | None]:
+    """Return (frontmatter fields, error). Uses PyYAML when installed."""
+    src, err = split_frontmatter(text)
+    if err or src is None:
+        return {}, err
+    try:
+        import yaml  # type: ignore[import-untyped]
+    except ImportError:
+        return parse_frontmatter_subset(src)
+    try:
+        data = yaml.safe_load(src) if src.strip() else {}
+    except yaml.YAMLError as exc:
+        return {}, f"frontmatter is not valid YAML: {str(exc).splitlines()[0]}"
+    if not isinstance(data, dict):
+        return {}, "frontmatter is not a YAML mapping"
+    return {str(k): v for k, v in data.items()}, None
+
+
+def type_errors(fields: dict[str, object]) -> list[str]:
+    errs = [f"'{k}' must be a string" for k in STRING_KEYS if k in fields and not isinstance(fields[k], str)]
+    errs += [f"'{k}' must be true or false" for k in BOOL_KEYS if k in fields and not isinstance(fields[k], bool)]
+    meta = fields.get("metadata")
+    if meta is not None and not (isinstance(meta, dict) and all(isinstance(v, str) for v in meta.values())):
+        errs.append("'metadata' must map keys to string values")
+    return errs
+
+
+def sidecar_disables_implicit(path: Path) -> bool:
+    """True if agents/openai.yaml sets policy.allow_implicit_invocation to false."""
+    if not path.is_file():
+        return False
+    text = path.read_text(encoding="utf-8")
+    try:
+        import yaml  # type: ignore[import-untyped]
+
+        data = yaml.safe_load(text)
+        policy = data.get("policy") if isinstance(data, dict) else None
+        return isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False
+    except ImportError:
+        pass
+    except Exception:  # noqa: BLE001 - any parse failure means "not disabled"
+        return False
+    in_policy = False
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            in_policy = line.split("#")[0].strip() == "policy:"
+        elif in_policy and re.match(r"^\s+allow_implicit_invocation:\s*false\s*(#.*)?$", line):
+            return True
+    return False
 
 
 def strip_code(text: str) -> str:
     """Drop fenced code blocks and inline code so links inside them are ignored."""
-    out, fence = [], None
+    out: list[str] = []
+    fence: tuple[str, int] | None = None
     for line in text.splitlines():
         m = FENCE_RE.match(line.strip())
-        if m:
-            marker = m.group(1)[0] * 3
-            if fence is None:
-                fence = marker
-            elif line.strip().startswith(fence):
-                fence = None
-            continue
         if fence is None:
+            if m:
+                fence = (m.group(1)[0], len(m.group(1)))
+                continue
             out.append(re.sub(r"`[^`]*`", "", line))
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and not line.strip()[len(m.group(1)):].strip():
+            fence = None
     return "\n".join(out)
 
 
@@ -93,8 +202,11 @@ class Checker:
         fields, err = parse_frontmatter(text)
         if err:
             self.add("error", err)
-        self.check_name(fields.get("name", ""))
-        self.check_description(fields.get("description", ""))
+        for e in type_errors(fields):
+            self.add("error", e)
+        name, desc = fields.get("name", ""), fields.get("description", "")
+        self.check_name(name if isinstance(name, str) else "")
+        self.check_description(desc.strip() if isinstance(desc, str) else "")
         self.check_keys(fields)
         n = len(text.splitlines())
         if n > SKILL_LINES_MAX:
@@ -129,19 +241,19 @@ class Checker:
         elif len(desc) > DESC_WARN:
             self.add("warning", f"description has {len(desc)} chars; aim for {DESC_WARN} or fewer")
 
-    def check_keys(self, fields: dict[str, str]) -> None:
+    def check_keys(self, fields: dict[str, object]) -> None:
         for k in fields:
             if k == "allowed-tools":
                 self.add("warning", "'allowed-tools' is experimental and harness-specific")
             elif k not in SPEC_KEYS | EXTENSION_KEYS:
                 self.add("warning", f"frontmatter key '{k}' is neither a spec field nor a known extension")
-        if fields.get("disable-model-invocation") == "true" and fields.get("user-invocable") == "false":
+        user_only = fields.get("disable-model-invocation") is True
+        if user_only and fields.get("user-invocable") is False:
             self.add("error", "both invocation paths are disabled; the skill is unreachable")
-        if fields.get("disable-model-invocation") == "true":
-            sidecar = self.root / "agents" / "openai.yaml"
-            if not sidecar.is_file() or "allow_implicit_invocation: false" not in sidecar.read_text(encoding="utf-8"):
-                self.add("warning", "user-only skill lacks agents/openai.yaml with allow_implicit_invocation: false")
-        if "compatibility" in fields and len(fields["compatibility"]) > 500:
+        if user_only and not sidecar_disables_implicit(self.root / "agents" / "openai.yaml"):
+            self.add("error", "user-only skill needs agents/openai.yaml setting policy.allow_implicit_invocation: false")
+        compat = fields.get("compatibility")
+        if isinstance(compat, str) and len(compat) > 500:
             self.add("error", "compatibility exceeds 500 chars")
 
     def check_intent(self) -> None:
@@ -178,14 +290,20 @@ class Checker:
                     self.add("error", f"{doc.relative_to(self.root).as_posix()}: broken link '{target}'")
 
 
-def find_skills(paths: list[Path]) -> list[Path]:
+def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Return (skill folders found, arguments that resolved to no skill)."""
     found: list[Path] = []
+    missing: list[Path] = []
     for p in paths:
         if (p / "SKILL.md").is_file():
             found.append(p)
-        elif p.is_dir():
-            found += sorted(d for d in p.iterdir() if (d / "SKILL.md").is_file())
-    return found
+            continue
+        subs = sorted(d for d in p.iterdir() if (d / "SKILL.md").is_file()) if p.is_dir() else []
+        if subs:
+            found += subs
+        else:
+            missing.append(p)
+    return found, missing
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,11 +315,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="print findings as JSON")
     args = ap.parse_args(argv)
 
-    skills = find_skills([p.resolve() for p in args.paths])
+    skills, missing = find_skills([p.resolve() for p in args.paths])
     if not skills:
         print("error: no folder with a SKILL.md found", file=sys.stderr)
         return 2
-    findings = [f for s in skills for f in Checker(s).run()]
+    findings = [{"skill": str(m), "level": "error", "message": "no SKILL.md here or in its subfolders"} for m in missing]
+    findings += [f for s in skills for f in Checker(s).run()]
     errors = sum(f["level"] == "error" for f in findings)
 
     if args.json:

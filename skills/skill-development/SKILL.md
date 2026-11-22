@@ -102,7 +102,7 @@ Keep in `SKILL.md` only what every run needs. Move everything else out, and link
 | Purpose | Location |
 | --- | --- |
 | Scratch output tied to a workspace | `<workspace>/.tmp/<skill-name>/` (gitignored) |
-| Temp output with no workspace, or for the user | `<system-temp>/agent-skills/<skill-name>/` |
+| Temp output with no workspace, or for the user | `<system-temp>/agent-skills/<skill-name>/` (Unix: `agent-skills-<uid>`) |
 | User configuration | `~/.config/agent-skills/<skill-name>/` |
 | Cache and persistent state | `<user-cache>/agent-skills/<skill-name>/` |
 

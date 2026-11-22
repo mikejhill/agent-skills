@@ -70,12 +70,48 @@ class CheckSkillTest(unittest.TestCase):
         self.assertTrue(any(l == "warning" and "'mode'" in m for l, m in msgs))
         self.assertTrue(any(l == "error" and "limit is 500" in m for l, m in msgs))
 
+    def test_yaml_semantics(self) -> None:
+        cases = {
+            "description: Use when: building\n": True,
+            "description: [one, two]\n": True,
+            "description: >-\n  Does X. Use when: Y.\n": False,
+            'description: "Use when: Y"\n': False,
+        }
+        for parser in (check_skill.parse_frontmatter, self.subset_only):
+            for desc, bad in cases.items():
+                fields, err = parser(f"---\nname: s # id\n{desc}---\n")
+                failed = bool(err) or bool(check_skill.type_errors(fields))
+                self.assertEqual(failed, bad, (parser.__name__, desc, err))
+                if not bad:
+                    self.assertEqual(fields["name"], "s")
+
+    @staticmethod
+    def subset_only(text: str):
+        src, _ = check_skill.split_frontmatter(text)
+        return check_skill.parse_frontmatter_subset(src or "")
+
+    def test_sidecar_must_be_effective(self) -> None:
+        front = "name: s\ndescription: D.\ndisable-model-invocation: true\n"
+        d = make_skill(self.root, "s", front, files={"agents/openai.yaml": "# allow_implicit_invocation: false\n"})
+        self.assertTrue(any(l == "error" and "openai.yaml" in m for l, m in levels(d)))
+        (d / "agents" / "openai.yaml").write_text("policy:\n  allow_implicit_invocation: false\n", encoding="utf-8")
+        self.assertEqual(levels(d), [])
+
+    def test_nested_fences(self) -> None:
+        body = "````markdown\n```bash\nx\n```\n[ex](references/none.md)\n````\n"
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body=body)
+        self.assertEqual(levels(d), [])
+
     def test_main_exit_codes(self) -> None:
         make_skill(self.root, "ok", "name: ok\ndescription: D.\n")
         self.assertEqual(check_skill.main([str(self.root), "--json"]), 0)
         make_skill(self.root, "bad", "name: other\ndescription: D.\n")
         self.assertEqual(check_skill.main([str(self.root)]), 1)
         self.assertEqual(check_skill.main([str(self.root / "missing")]), 2)
+
+    def test_unresolved_argument_fails(self) -> None:
+        ok = make_skill(self.root, "ok", "name: ok\ndescription: D.\n")
+        self.assertEqual(check_skill.main([str(ok), str(self.root / "typo")]), 1)
 
 
 if __name__ == "__main__":
