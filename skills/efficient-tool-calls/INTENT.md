@@ -39,3 +39,5 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   Git Bash; smoke test fails when shells exist but every launch fails.
 - 2026-11-22: [agent] Eighth Astra review: baseline runs no startup code (BASH_ENV/ENV unset,
   zsh -f); `--profiles` has its own cache record; exit 1 when every shell found fails to start.
+- 2026-11-22: [agent] Ninth Astra review: baseline bash gets --norc; SKILL.md promises only to skip user
+  startup files; an all-failed refresh deletes the older cached success.

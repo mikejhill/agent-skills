@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
@@ -457,17 +458,22 @@ class Cache(unittest.TestCase):
         self.assertIn("failed to start", r["recommendation"])
         self.assertEqual(sorted(r["failed"]), ["bash", "pwsh"])
 
+    def test_failed_refresh_drops_old_success(self):
+        self.run_probe()
+        self.assertTrue(os.path.isfile(self.cache))
+        sp.time_one = lambda argv, runs, env=None: None  # same shells, now none starts
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sp.main(["--runs", "1", "--force"]), 1)
+        self.assertFalse(os.path.exists(self.cache))
+
     def test_baseline_bash_ignores_bash_env(self):
         seen = {}
         def fake(argv, runs, env=None):
             seen[argv[0]] = env
             return {"median_ms": 1, "p90_ms": 1}
         sp.time_one = fake
-        os.environ["BASH_ENV"] = "/tmp/user-startup.sh"
-        try:
+        with mock.patch.dict(os.environ, {"BASH_ENV": "/tmp/user-startup.sh"}):
             sp.measure(1)
-        finally:
-            os.environ.pop("BASH_ENV")
         self.assertNotIn("BASH_ENV", seen["/fake/bash"])
 
     def test_pwsh_failure_falls_back_to_51(self):

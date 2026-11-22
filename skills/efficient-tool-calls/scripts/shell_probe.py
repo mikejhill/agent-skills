@@ -144,8 +144,9 @@ def candidates(profiles=False):
     out = []
     posix = [("bash", win_bash())] if IS_WIN else [(n, find_exe(n)) for n in ("bash", "zsh")]
     for name, p in posix:  # what agent shell tools run (not sh)
-        if p:  # baseline skips startup files: zsh -f skips .zshenv; BASH_ENV is unset in measure()
-            out.append((name, "posix", [p, "-f", "-c", "true"] if name == "zsh" else [p, "-c", "true"]))
+        if p:  # baseline skips user startup files: zsh -f skips ~/.zshenv; bash --norc skips the
+            # ~/.bashrc some builds read under ssh; BASH_ENV is unset in measure()
+            out.append((name, "posix", [p, "-f", "-c", "true"] if name == "zsh" else [p, "--norc", "-c", "true"]))
             if profiles:
                 out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
     # Windows PowerShell 5.1 only stands in when pwsh 7 is missing: agent tools run pwsh, and
@@ -401,6 +402,8 @@ def main(argv=None):
     res = measure(max(1, a.runs), a.profiles)
     try:
         if not res["shells"]:  # a run that found nothing (restricted PATH, blocked launches) isn't cached
+            if res.get("failed") and os.path.exists(path):
+                os.remove(path)  # and an older success for the same shells must not outlive it
             raise OSError("no shell measured")
         if os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
