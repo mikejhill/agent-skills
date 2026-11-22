@@ -65,7 +65,7 @@ python .github/ci/skills_ref_check.py
 python skills/skill-development/scripts/check_skill.py skills
 ruff check . && yamllint --strict . && actionlint
 git ls-files '*.sh' | xargs shellcheck
-pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser -Force; git ls-files "*.ps1" | % { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error }'
+pwsh -c 'Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force; $f = @(git ls-files "*.ps1" | % { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error }); $f; exit [int][bool]$f.Count'
 npx markdownlint-cli2
 python -m pytest
 ```

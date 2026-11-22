@@ -92,13 +92,16 @@ def test_html_report_check_flags_unbuilt_template() -> None:
 
 
 def test_new_handoff_reserves_private_file(tmp_path: Path) -> None:
-    env = dict(os.environ, TMPDIR=str(tmp_path), TEMP=str(tmp_path), TMP=str(tmp_path))
+    # Windows accepts only temp roots inside %USERPROFILE%, so use a synthetic profile.
+    temp = tmp_path / "AppData" / "Local" / "Temp"
+    temp.mkdir(parents=True, mode=0o700)
+    env = dict(os.environ, USERPROFILE=str(tmp_path), TMPDIR=str(temp), TEMP=str(temp), TMP=str(temp))
     proc = run(PY, SKILLS / "session-handoff" / "scripts" / "new_handoff.py", "ci", "smoke", "test", env=env)
     assert_ok(proc)
     path = Path(json.loads(proc.stdout)["path"])
     assert path.is_file() and path.stat().st_size == 0
     assert path.name.startswith("handoff-") and path.name.endswith("-ci-smoke-test.md")
-    assert tmp_path.resolve() in path.resolve().parents
+    assert temp.resolve() in path.resolve().parents
     if os.name != "nt":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 

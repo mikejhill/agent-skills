@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from skills_ref.errors import ParseError
-from skills_ref.parser import find_skill_md, parse_frontmatter
+from skills_ref.parser import parse_frontmatter
 from skills_ref.validator import validate_metadata
 
 REPO = Path(__file__).resolve().parents[2]
@@ -26,9 +26,10 @@ from check_skill import EXTENSION_KEYS  # noqa: E402
 
 
 def check(skill_dir: Path) -> list[str]:
-    skill_md = find_skill_md(skill_dir)
-    if skill_md is None:
-        return ["Missing required file: SKILL.md"]
+    # skills-ref also accepts skill.md; this library requires the exact name.
+    if "SKILL.md" not in {p.name for p in skill_dir.iterdir()}:
+        return ["Missing required file: SKILL.md (exact case)"]
+    skill_md = skill_dir / "SKILL.md"
     try:
         metadata, _ = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
     except ParseError as e:
