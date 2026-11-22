@@ -28,7 +28,7 @@ import threading
 import time
 
 IS_WIN = os.name == "nt"
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CLOSE_MS = 150  # differences below this are small next to model and harness time per call
 
 
@@ -44,35 +44,57 @@ def cache_path():
     return os.path.join(base, "efficient-tool-calls", "shell-probe.json")
 
 
+def _norm(p):
+    return os.path.normcase(os.path.realpath(p))
+
+
+def _under(p, root):
+    try:
+        return os.path.commonpath([p, root]) == root
+    except ValueError:  # different drives
+        return False
+
+
+def workspace_root():
+    """The repository holding the current directory (nearest ancestor with .git/.hg/.svn),
+    else the current directory itself."""
+    cwd = _norm(os.getcwd())
+    d = cwd
+    while True:
+        if any(os.path.exists(os.path.join(d, m)) for m in (".git", ".hg", ".svn")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return cwd
+        d = parent
+
+
 def find_exe(name, skip=None):
-    """Look `name` up on PATH, absolute directories only, skipping the current directory and
-    everything under it (shutil.which on Windows Python <= 3.11 searches the current directory
-    first), so a workspace can't plant a `pwsh.exe`."""
+    """Look `name` up on PATH, absolute directories only, skipping the workspace (the
+    repository around the current directory, or the current directory) and everything under
+    it: shutil.which on Windows Python <= 3.11 searches the current directory first, and an
+    activated project env puts workspace dirs on PATH. A file that resolves into the workspace
+    through a link is skipped too. Best effort: run the probe from a directory you trust."""
     exts = [""]
     if IS_WIN:
         exts = [e for e in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if e]
         if os.path.splitext(name)[1]:
             exts = [""] + exts
-    cwd = os.path.normcase(os.path.realpath(os.getcwd()))
-    home = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
-    try:  # run from home or a drive root, "under cwd" would cover user installs: only skip cwd
-        broad = os.path.commonpath([home, cwd]) == cwd
-    except ValueError:
-        broad = False
+    root = workspace_root()
+    # If the workspace is home or a drive root (a dotfiles repo, or run from ~), "under it"
+    # would cover user installs such as ~/.local/bin: only skip the directory itself.
+    broad = _under(_norm(os.path.expanduser("~")), root)
+
+    def inside(p):
+        return p == root if broad else _under(p, root)
     for d in os.environ.get("PATH", "").split(os.pathsep):
         d = d.strip('"')
-        if not d or not os.path.isabs(d):
-            continue
-        rd = os.path.normcase(os.path.realpath(d))
-        try:
-            inside = rd == cwd if broad else os.path.commonpath([rd, cwd]) == cwd
-        except ValueError:  # different drives
-            inside = False
-        if inside:  # the workspace or anything under it (e.g. an activated project env)
+        if not d or not os.path.isabs(d) or inside(_norm(d)):
             continue
         for e in exts:
             f = os.path.join(d, name + e)
-            if os.path.isfile(f) and os.access(f, os.X_OK) and not (skip and skip(f)):
+            if (os.path.isfile(f) and os.access(f, os.X_OK) and not inside(_norm(f))
+                    and not (skip and skip(f))):
                 return f
     return None
 
@@ -80,9 +102,23 @@ def find_exe(name, skip=None):
 def win_bash():
     """Git Bash: the first native bash.exe on PATH, else a standard Git install. Never a WSL
     launcher (that starts a Linux VM)."""
+    launchers = []  # the system launcher under every name it has (Sysnative for 32-bit Python)
+    for d in (_try(system_dir), os.path.join(os.environ.get("SystemRoot") or os.environ.get("windir") or "",
+                                              "Sysnative")):
+        if d and os.path.isabs(d) and os.path.isfile(os.path.join(d, "bash.exe")):
+            launchers.append(os.path.join(d, "bash.exe"))
+
     def wsl(f):  # System32\bash.exe and the WindowsApps alias both start WSL
-        f = f.lower().replace("/", "\\")
-        return "\\system32\\" in f or "\\windowsapps\\" in f
+        low = f.lower().replace("/", "\\")
+        if any(s in low for s in ("\\system32\\", "\\sysnative\\", "\\syswow64\\", "\\windowsapps\\")):
+            return True
+        for l in launchers:
+            try:
+                if os.path.samefile(f, l):
+                    return True
+            except OSError:
+                pass
+        return False
     cands = [find_exe("bash", skip=wsl)]  # the copy a harness running `bash` gets, if on PATH
     for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"),
                  os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
@@ -116,6 +152,13 @@ def candidates():
         if p:
             out.append(("cmd", "cmd", [p, "/d", "/c", "exit"]))
     return out
+
+
+def _try(fn):
+    try:
+        return fn()
+    except Exception:
+        return None
 
 
 def system_dir():
@@ -230,8 +273,9 @@ def recommend(shells):
 
 
 def measure(runs):
-    shells, failed = {}, []
+    shells, failed, inv = {}, [], {}
     for name, fam, argv in candidates():
+        inv[name] = argv[0]  # every candidate's executable, measured or failed
         t = time_one(argv, runs)
         if t:
             shells[name] = dict(t, family=fam, path=argv[0])
@@ -241,7 +285,8 @@ def measure(runs):
         for v in shells.values():
             v["family"] = v["family"].replace("powershell-5", "powershell")
     res = {"v": CACHE_VERSION, "host": socket.gethostname(), "platform": sys.platform,
-           "measured_at": int(time.time()), "runs": runs, "shells": shells}
+           "measured_at": int(time.time()), "runs": runs, "shells": shells,
+           "inventory": inv}
     if failed:
         res["failed"] = failed
     res.update(recommend(shells))
@@ -263,13 +308,18 @@ def valid_cache(c, runs):
         return None
     if not isinstance(c.get("runs"), int) or c["runs"] < runs:  # fewer samples than asked for
         return None
-    inv, failed = inventory(), c.get("failed") or []
-    if set(inv) != set(shells) | set(failed) or any(inv[k] != v.get("path") for k, v in shells.items()):
-        return None  # another PATH or install: different shells than the cached run measured
     for v in shells.values():
         if not (isinstance(v, dict) and isinstance(v.get("median_ms"), (int, float))
                 and isinstance(v.get("p90_ms"), (int, float)) and isinstance(v.get("family"), str)):
             return None
+    failed = c.get("failed", [])
+    if not (isinstance(failed, list) and all(isinstance(f, str) for f in failed)):
+        return None
+    inv = c.get("inventory")
+    if not isinstance(inv, dict) or set(inv) != set(shells) | set(failed):
+        return None
+    if inv != inventory() or any(inv[k] != v.get("path") for k, v in shells.items()):
+        return None  # another PATH or install (failed shells included): re-measure
     for k in ("fastest_posix", "fastest_powershell", "recommendation", "profile_cost_ms", "login_cost_ms"):
         c.pop(k, None)
     c.update(recommend(shells))

@@ -67,6 +67,9 @@ python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else pyt
   (`"cached": true`). `--force` re-measures. The cache is also skipped when the shells found on
   PATH differ from the cached run or `--runs` asks for more samples; re-measure after
   upgrading a shell, changing antivirus, or when calls feel slower than the cache says.
+- It runs the shells it finds on PATH. It skips PATH entries inside the current
+  repository (or the current directory outside one), but that is best effort: run it from
+  a directory you trust, not from an untrusted checkout with an activated environment.
 - `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more, and
   `login_cost_ms` when a login shell does. They matter only if your harness loads the
   profile for each call.

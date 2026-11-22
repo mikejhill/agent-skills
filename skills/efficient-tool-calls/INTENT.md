@@ -26,3 +26,6 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   Windows PowerShell 5.1 (it had hidden a 171 ms Git Bash vs pwsh gap); report login-shell
   cost; per-process costs in Git Bash and per-process module loads in PowerShell; harness
   overhead can differ per shell.
+- 2026-11-22: [agent] Fifth Astra review. PATH skipping covers the whole repository around the
+  current directory and links into it; failed shells are part of the cache inventory; WSL launcher
+  matched by identity (Sysnative). Documented the trust assumption instead of more path heuristics.

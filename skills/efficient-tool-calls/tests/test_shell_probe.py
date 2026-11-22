@@ -169,6 +169,44 @@ class Launch(unittest.TestCase):
                 os.environ["PATH"] = oldpath
 
 
+    def test_whole_repository_is_skipped_from_a_subdirectory(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, ".git"))
+            work = os.path.join(d, "src", "pkg")
+            sub = os.path.join(d, ".venv", "bin")  # an env elsewhere in the same repository
+            os.makedirs(work)
+            os.makedirs(sub)
+            exe = os.path.join(sub, "fakeshell-xyz" + (".exe" if os.name == "nt" else ""))
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(exe, 0o755)
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            os.chdir(work)
+            os.environ["PATH"] = os.pathsep.join([sub, oldpath])
+            try:
+                self.assertIsNone(sp.find_exe("fakeshell-xyz"))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_link_into_workspace_is_skipped(self):
+        with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as out:
+            exe = os.path.join(ws, "fakeshell-xyz")
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(exe, 0o755)
+            os.symlink(exe, os.path.join(out, "fakeshell-xyz"))
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            os.chdir(ws)
+            os.environ["PATH"] = os.pathsep.join([out, oldpath])
+            try:
+                self.assertIsNone(sp.find_exe("fakeshell-xyz"))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+
+
 class Cache(unittest.TestCase):
     def run_probe(self, *args):
         p = subprocess.run([sys.executable, SCRIPT, "--runs", "1"] + list(args), capture_output=True,
@@ -263,6 +301,33 @@ class Cache(unittest.TestCase):
         bad = dict(good, shells={})
         self.write_cache(bad)
         self.assertFalse(self.run_probe()["cached"])
+
+    def test_malformed_entries_are_a_miss_not_a_crash(self):
+        good = self.run_probe()
+        name = next(iter(good["shells"]))
+        for mutate in (lambda c: c["shells"].__setitem__(name, None),
+                       lambda c: c.__setitem__("failed", 5),
+                       lambda c: c.__setitem__("failed", [None]),
+                       lambda c: c.pop("inventory"),
+                       lambda c: c.__setitem__("inventory", [])):
+            bad = json.loads(json.dumps(good))
+            mutate(bad)
+            self.write_cache(bad)
+            self.assertFalse(self.run_probe()["cached"])
+
+    def test_failed_shell_with_new_path_remeasures(self):
+        orig = sp.inventory
+        cached = {"v": sp.CACHE_VERSION, "host": __import__("socket").gethostname(), "platform": sys.platform,
+                  "measured_at": int(time.time()), "runs": 5, "failed": ["pwsh"],
+                  "shells": {"bash": {"median_ms": 80, "p90_ms": 90, "family": "posix", "path": "/b"}},
+                  "inventory": {"bash": "/b", "pwsh": "/old/pwsh"}}
+        try:
+            sp.inventory = lambda: {"bash": "/b", "pwsh": "/old/pwsh"}
+            self.assertIsNotNone(sp.valid_cache(json.loads(json.dumps(cached)), 5))
+            sp.inventory = lambda: {"bash": "/b", "pwsh": "/new/pwsh"}  # a working install now first on PATH
+            self.assertIsNone(sp.valid_cache(json.loads(json.dumps(cached)), 5))
+        finally:
+            sp.inventory = orig
 
     def test_pwsh_failure_falls_back_to_51(self):
         orig_c, orig_t = sp.candidates, sp.time_one
