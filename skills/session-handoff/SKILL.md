@@ -41,56 +41,54 @@ Treat the focus as the user's priority for the next session, not as a replacemen
 
 1. **Gather.** Review the whole conversation, not only recent turns. Collect goals, decisions and their reasons, constraints the user stated, files read or changed, commands run, results, errors, and anything still pending.
 2. **Verify cheaply.** Where tools allow, confirm facts the next session depends on instead of recalling them: current branch and uncommitted changes (`git status`, `git log -1`), whether referenced files exist, and PR or CI state if one was in play. Do not run long builds or tests for this. Mark anything unverified as such.
-3. **Resolve the temp directory** (see [Output location](#output-location)).
-4. **Write** the document using the [template](#document-template) and the [writing rules](#writing-rules).
+3. **Reserve the file** (see [Output location](#output-location)).
+4. **Write** the document into it using the [template](#document-template) and the [writing rules](#writing-rules).
 5. **Report** the result to the user (see [Final response](#final-response)).
 
 ## Output Location
 
-### Temp directory
+### Reserve the file
 
-Use the first that resolves to an existing, writable directory:
-
-1. `TMPDIR` (macOS, most Unix)
-2. `TEMP`, then `TMP` (Windows)
-3. `/tmp` (Unix fallback)
-
-Equivalent one-liners return the same answer:
+Run the bundled script with 2 to 5 words naming the goal (or the focus, when given):
 
 ```bash
-# POSIX shell
-dir="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
+python3 scripts/new_handoff.py fix safari export   # use "python" or "py" where "python3" is absent
 ```
 
-```powershell
-# PowerShell (any OS)
-$dir = [System.IO.Path]::GetTempPath()
-```
+It prints `{"path": "...", "uri": "file:///..."}` and guarantees:
 
-```python
-import tempfile; d = tempfile.gettempdir()
-```
+- **Verified temp directory.** Checks `TMPDIR`, `TEMP`, `TMP`, then (Unix) `/tmp` and `/var/tmp`, and takes the first that exists and is writable. Never falls back to the working directory; exits non-zero instead.
+- **Private directory.** Windows: `%TEMP%\agent-handoffs\` (already per-user). Unix: `<temp>/agent-handoffs-<uid>/`, created mode `0700`; refuses a directory that is a symlink or owned by another user.
+- **No overwrites.** Creates `handoff-<YYYYMMDD-HHMMSS>-<slug>.md` exclusively, mode `0600`; on a clash it tries `-2`, `-3`, and so on.
 
-### File path
+Write the document into the reserved file. Never write to any other path.
 
-```text
-<temp>/agent-handoffs/handoff-<YYYYMMDD-HHMMSS>-<slug>.md
-```
+If the script exits non-zero, report its error to the user and stop. Do not pick another location.
 
-- Create `agent-handoffs/` if missing.
-- `<YYYYMMDD-HHMMSS>` is local time when written.
-- `<slug>` is 2 to 5 lowercase hyphenated words naming the goal (or the focus, when given), for example `fix-safari-export`.
-- Never overwrite an existing file. If the name exists, append `-2`, `-3`, and so on.
-- Use the platform's native separators in the path you report.
+### Without Python
+
+Do the same steps by hand, keeping every guarantee:
+
+1. Take the first of `TMPDIR`, `TEMP`, `TMP`, `/tmp` that is an existing, writable directory. If none is, stop and report.
+2. Unix: `umask 077; mkdir -p "<temp>/agent-handoffs-$(id -u)"`, then confirm it is a plain directory you own with mode `700` (`ls -ld`). Windows: create `%TEMP%\agent-handoffs`.
+3. Create the file exclusively: POSIX `set -C` before redirecting (`: > "$file"`), PowerShell `New-Item -ItemType File -Path $file` (fails if it exists). On failure, try the next suffix.
 
 ### Link
 
 Report both forms:
 
-- The absolute path, in the platform's native form (`C:\Users\<user>\AppData\Local\Temp\agent-handoffs\...` on Windows, `/tmp/agent-handoffs/...` on Unix).
-- A `file://` URI: `file:///C:/Users/<user>/AppData/Local/Temp/agent-handoffs/...` on Windows (forward slashes, drive letter after three slashes), `file:///tmp/agent-handoffs/...` on Unix. Percent-encode spaces and other reserved characters.
+- The absolute path, in the platform's native form.
+- The `file://` URI the script printed (by hand: `file:///C:/Users/<user>/AppData/Local/Temp/...` on Windows, `file:///tmp/...` on Unix, percent-encoding reserved characters).
 
-If the session runs in an ephemeral or remote environment (a cloud container, a remote shell), say that the file lives there and will not survive the environment, so the user can copy it out.
+### Remote sessions
+
+A `file://` link opens on the user's machine. When the agent runs elsewhere (cloud container, remote shell, devcontainer, SSH), the link alone does not reach the file. In that case:
+
+1. Deliver the file through a file-sharing or download mechanism the harness provides, if one exists and the user expects it.
+2. Otherwise give a concrete copy-out command for that environment (for example `scp <host>:<path> .`, `docker cp <container>:<path> .`, or `cat <path>` to copy from the terminal), and offer to print the document inline.
+3. Say that the file disappears with the environment.
+
+Never upload or send the document anywhere the user has not asked for.
 
 ## Document Template
 
@@ -168,7 +166,7 @@ Reply to the user with only:
 
 1. The link, as a Markdown link whose target is the `file://` URI and whose text is the absolute path.
 2. One line stating the goal and next step the handoff leads with.
-3. The ephemeral-environment warning, if it applies.
+3. For a remote session, the retrieval step from [Remote sessions](#remote-sessions).
 
 Do not paste the document into the reply.
 
@@ -182,4 +180,4 @@ Before reporting, check the written file:
 - [ ] Branch and change state were verified, or marked unverified.
 - [ ] The focus, when given, appears in the header and drives Next steps.
 - [ ] No secrets appear.
-- [ ] The file exists at the reported path.
+- [ ] The file exists at the reported path, inside the private handoff directory.
