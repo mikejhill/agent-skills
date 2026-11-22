@@ -26,8 +26,10 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -745,6 +747,74 @@ def _linux_pdeathsig():
 # ---------------------------------------------------------------------- supervisor
 
 
+def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
+    """Where Codex writes its final message (-o): (path, scratch dir to remove or None).
+
+    Codex 0.170+ opens the -o file with a strict no-follow open on Windows and has been
+    seen to reject paths under %LOCALAPPDATA%\\cross-harness with "path contains a
+    reparse point" although no component is a reparse point, while paths under
+    %TEMP% work. So on Windows, Codex writes into a private temp dir and the result
+    is moved into the job dir afterwards. Elsewhere it writes into the job dir.
+    """
+    if job["target"] != "codex" or not IS_WIN:
+        return out_path, None
+    try:
+        # Only a temp dir inside the user's profile (the default %TEMP%) is trusted:
+        # older Pythons ignore mkdtemp's 0o700 mode on Windows, so the dir inherits
+        # its parent's ACL. The default %TEMP% sits in %LOCALAPPDATA%, the same
+        # tree the job dir inherits from, so this exposes nothing new. A TMPDIR
+        # outside the profile may be shared and falls back to the job dir.
+        tmp = Path(tempfile.gettempdir()).resolve()
+        profile = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
+        if profile not in tmp.parents:
+            return out_path, None
+        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-", dir=tmp))
+    except (OSError, RuntimeError):  # no usable temp dir, or no resolvable profile
+        return out_path, None
+    return scratch / out_path.name, scratch
+
+
+def collect_output(cli_out: Path, out_path: Path, scratch):
+    """Move a final message written outside the job dir into it, then drop the scratch dir.
+
+    The copy goes to a staging file that replaces the destination only once complete,
+    so a failed copy never leaves a truncated result. On failure the scratch dir is
+    kept, so the only copy of the answer survives; the error names its path.
+    Returns an error string or None.
+    """
+    if not scratch:
+        return None
+    staging = None
+    try:
+        try:
+            st = os.lstat(cli_out)  # raises on access errors; only "missing" means no result
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat.S_ISREG(st.st_mode):  # never follow a planted link
+            raise OSError(f"{cli_out} is not the plain file Codex writes")
+        if st is not None:
+            fd = os.open(cli_out, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as src:
+                ost = os.fstat(src.fileno())
+                # The opened file must be the one inspected above, not a swapped-in link target.
+                if (ost.st_dev, ost.st_ino) != (st.st_dev, st.st_ino) or not stat.S_ISREG(ost.st_mode):
+                    raise OSError(f"{cli_out} changed while it was being collected")
+                data = src.read()
+            fd, staging = tempfile.mkstemp(prefix=out_path.name + ".", suffix=".partial", dir=out_path.parent)
+            with os.fdopen(fd, "wb") as f:  # created exclusively: never an existing file or link
+                f.write(data)
+            os.replace(staging, out_path)
+    except OSError as e:
+        if staging:
+            try:
+                os.unlink(staging)
+            except OSError:
+                pass
+        return f"could not copy the final message into the job dir ({e}); it is kept at {cli_out}"
+    shutil.rmtree(scratch, ignore_errors=True)
+    return None
+
+
 def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_session=None) -> dict:
     """Read one CLI run's output files into result fields."""
     fields = {}
@@ -833,7 +903,26 @@ def supervise(job_id: str) -> int:
     def run_step(step: str, prompt, prefix: str) -> dict:
         """Run one CLI step to completion. Returns parsed fields plus exit_code."""
         out_path, so_path, se_path = jdir / f"{prefix}.md", jdir / f"{prefix}.stdout.log", jdir / f"{prefix}.stderr.log"
-        argv, stdin_text = build_command(job, step, prompt, out_path)
+        cli_out, scratch = codex_output_path(job, prefix, out_path)
+        try:
+            fields = _run_step(step, prompt, out_path, so_path, se_path, cli_out)
+        except BaseException:
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
+            raise
+        copy_err = collect_output(cli_out, out_path, scratch)
+        fields.update(parse_outputs(job["target"], so_path, out_path, job.get("resume_session")))
+        has = out_path.is_file() and out_path.stat().st_size > 0
+        if copy_err:
+            fields["error"] = copy_err  # scratch kept: it holds the only copy
+        fields["ok"] = fields["exit_code"] == 0 and has and not fields.get("error")
+        if not fields["ok"] and not fields.get("error"):
+            tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
+            fields["error"] = tail or f"exit code {fields['exit_code']}" + ("" if has else ", no final message")
+        return fields
+
+    def _run_step(step, prompt, out_path, so_path, se_path, cli_out) -> dict:
+        argv, stdin_text = build_command(job, step, prompt, cli_out)
         with open(so_path, "wb") as so, open(se_path, "wb") as se:
             child = subprocess.Popen(
                 argv, cwd=job["cwd"], env=child_env(job),
@@ -862,14 +951,7 @@ def supervise(job_id: str) -> int:
                 raise
         if not IS_WIN:
             cont.reap(child)  # end stragglers between steps (Windows: at job end)
-        fields = parse_outputs(job["target"], so_path, out_path, job.get("resume_session"))
-        fields["exit_code"] = child.returncode
-        has = out_path.is_file() and out_path.stat().st_size > 0
-        fields["ok"] = child.returncode == 0 and has and not fields.get("error")
-        if not fields["ok"] and not fields.get("error"):
-            tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
-            fields["error"] = tail or f"exit code {child.returncode}" + ("" if has else ", no final message")
-        return fields
+        return {"exit_code": child.returncode}
 
     final = {}
     claude_native = job["target"] == "claude" and job.get("mode") == "native"

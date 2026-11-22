@@ -27,6 +27,9 @@ WORK = TMP / "repo"
 WORK.mkdir()
 ENV = dict(os.environ, CROSS_HARNESS_HOME=str(TMP / "home"), FAKE_PIDS=str(TMP / "pids"))
 ENV.pop("CROSS_HARNESS_DEPTH", None)
+# Keep temp output dirs inside the test tree (tempfile checks TMPDIR first, also on Windows).
+(TMP / "t").mkdir()
+ENV.update(TMPDIR=str(TMP / "t"), TEMP=str(TMP / "t"), TMP=str(TMP / "t"))
 
 
 def fake_bin(flavor):
@@ -273,6 +276,52 @@ def _():
     run("wait", jid, "--timeout", "30", check=0)
     a = job(jid)["argv"]
     assert a[a.index("-s") + 1] == "read-only" and "review" not in a, a
+
+
+@case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
+def _():
+    saved, saved_tmp = xh.IS_WIN, tempfile.tempdir
+    xh.IS_WIN = True
+    tempfile.tempdir = str(TMP / "t")  # keep in-process scratch dirs in the test tree
+    saved_profile = os.environ.get("USERPROFILE")
+    os.environ["USERPROFILE"] = str(TMP)  # the test tree stands in for the user profile
+    try:
+        out = TMP / "jobdir" / "result.md"
+        out.parent.mkdir()
+        cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x1"}, "result", out)
+        assert scratch and cli_out.parent == scratch and scratch.parent == (TMP / "t").resolve(), cli_out
+        cli_out.write_text("answer")
+        xh.collect_output(cli_out, out, scratch)
+        assert out.read_text() == "answer" and not scratch.exists()
+        same, none = xh.codex_output_path({"target": "claude", "id": "x2"}, "result", out)
+        assert same == out and none is None
+        # A failed copy leaves no truncated result and reports the error.
+        out.unlink()
+        cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x3"}, "result", out)
+        cli_out.write_text("full answer")
+        real = xh.os.replace
+
+        def broken(src, dst):
+            os.replace = real  # restore before raising
+            raise OSError(28, "No space left on device")
+        xh.os.replace = broken
+        try:
+            err = xh.collect_output(cli_out, out, scratch)
+        finally:
+            xh.os.replace = real
+        assert err and not out.exists() and not list(out.parent.glob("*.partial")), err
+        assert cli_out.read_text() == "full answer" and str(cli_out) in err, "answer lost on copy failure"
+        shutil.rmtree(scratch)
+        # A temp dir outside the user profile may be shared: use the job dir instead.
+        os.environ["USERPROFILE"] = str(TMP / "elsewhere")
+        same, none = xh.codex_output_path({"target": "codex", "id": "x4"}, "result", out)
+        assert same == out and none is None
+    finally:
+        xh.IS_WIN, tempfile.tempdir = saved, saved_tmp
+        if saved_profile is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = saved_profile
 
 
 @case("no job holds the repo after completion")
