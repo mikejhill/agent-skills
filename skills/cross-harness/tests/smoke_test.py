@@ -302,6 +302,10 @@ def _():
     log.write_text("\n".join([msg("progress"), msg(""), done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
     assert not out.exists(), out.read_text()
+    tool = json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": "git diff"}})
+    log.write_text("\n".join([msg("Checking the diff"), tool, done]) + "\n", encoding="utf-8")
+    xh.parse_outputs("codex", log, out)
+    assert not out.exists(), out.read_text()
     log.write_text("\n".join([msg("progress"), msg("a\u2028b\r\nc"), done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
     assert out.read_bytes() == "a\u2028b\r\nc".encode("utf-8"), out.read_bytes()
@@ -309,13 +313,14 @@ def _():
 
 @case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
 def _():
-    saved = xh.IS_WIN
+    saved, saved_tmp = xh.IS_WIN, tempfile.tempdir
     xh.IS_WIN = True
+    tempfile.tempdir = str(TMP / "t")  # keep in-process scratch dirs in the test tree
     try:
         out = TMP / "jobdir" / "result.md"
         out.parent.mkdir()
         cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x1"}, "result", out)
-        assert scratch and cli_out.parent == scratch and Path(tempfile.gettempdir()) in scratch.parents, cli_out
+        assert scratch and cli_out.parent == scratch and scratch.parent == TMP / "t", cli_out
         cli_out.write_text("answer")
         xh.collect_output(cli_out, out, scratch)
         assert out.read_text() == "answer" and not scratch.exists()
@@ -336,33 +341,10 @@ def _():
         finally:
             xh.shutil.copyfile = real
         assert err and not out.exists() and not list(out.parent.glob("*.partial")), err
+        assert cli_out.read_text() == "full answer" and str(cli_out) in err, "answer lost on copy failure"
+        shutil.rmtree(scratch)
     finally:
-        xh.IS_WIN = saved
-
-
-@case("sweep reclaims only stale scratch dirs of finished or missing jobs")
-def _():
-    jid = start("task", "-t", "codex", "hello")
-    run("wait", jid, "--timeout", "30", check=0)
-    root = TMP / "t" / "cross-harness-out" / xh.hashlib.sha256(
-        str((TMP / "home" / "jobs").resolve()).lower().encode("utf-8")).hexdigest()[:12]
-    root.mkdir(parents=True, exist_ok=True)
-    foreign = root.parent / "otherhome1234" / "xh-20000101-000000-beef-result-z9"
-    foreign.mkdir(parents=True)
-    done = root / f"{jid}-result-abc123"
-    gone_job = root / "xh-20000101-000000-dead-fix-q_1"
-    fresh = root / f"{jid}-fix-new1"
-    other = root / "unrelated"
-    for d in (done, gone_job, fresh, other):
-        d.mkdir()
-        (d / "f").write_text("x")
-    old = time.time() - 3600
-    for d in (done, gone_job, other, foreign):
-        os.utime(d, (old, old))
-    run("status", check=0)
-    assert not done.exists() and not gone_job.exists(), "stale dirs kept"
-    assert fresh.exists() and other.exists(), "fresh or unrelated dir removed"
-    assert foreign.exists(), "another state home's scratch dir removed"
+        xh.IS_WIN, tempfile.tempdir = saved, saved_tmp
 
 
 @case("no job holds the repo after completion")

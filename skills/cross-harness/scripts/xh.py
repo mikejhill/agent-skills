@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import hashlib
 import json
 import os
 import re
@@ -759,61 +758,21 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     if job["target"] != "codex" or not IS_WIN:
         return out_path, None
     try:
-        root = scratch_root()
-        root.mkdir(parents=True, exist_ok=True)
-        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-", dir=root))
-    except OSError:
+        # mkdtemp creates the dir for this user only (mode 0o700; on Windows
+        # Python 3.13+ applies a matching ACL, and %TEMP% is per-user anyway).
+        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-"))
+    except OSError:  # includes no usable temp dir at all
         return out_path, None
     return scratch / out_path.name, scratch
-
-
-def scratch_root() -> Path:
-    """The only place scratch dirs live; sweep reclaims leftovers by scanning it.
-
-    Namespaced by state home, so a sweep under one CROSS_HARNESS_HOME never
-    touches the scratch dirs of jobs that belong to another.
-    """
-    key = hashlib.sha256(str(jobs_dir().resolve()).lower().encode("utf-8")).hexdigest()[:12]
-    return Path(tempfile.gettempdir()) / "cross-harness-out" / key
-
-
-SCRATCH_NAME = re.compile(r"^(xh-\d{8}-\d{6}-[0-9a-f]{4})-(result|fix)-[A-Za-z0-9_]+$")
-
-
-def reclaim_scratch() -> None:
-    """Remove scratch dirs whose job is finished or gone.
-
-    A cancel, timeout or killed supervisor can end before its own cleanup. Only dirs
-    directly in scratch_root() whose names match SCRATCH_NAME are touched, and none
-    younger than a minute, so a starting or just-finished supervisor keeps its own.
-    """
-    try:
-        entries = list(scratch_root().iterdir())
-    except OSError:  # includes no usable temp dir at all
-        return
-    for d in entries:
-        m = SCRATCH_NAME.match(d.name)
-        if not m or d.is_symlink() or not d.is_dir():
-            continue
-        try:
-            if time.time() - d.stat().st_mtime < 60:
-                continue
-        except OSError:
-            continue
-        p = jobs_dir() / m.group(1) / "job.json"
-        try:
-            status = json.loads(p.read_text(encoding="utf-8")).get("status") if p.is_file() else None
-        except (OSError, json.JSONDecodeError):
-            continue
-        if status not in ACTIVE:
-            shutil.rmtree(d, ignore_errors=True)
 
 
 def collect_output(cli_out: Path, out_path: Path, scratch):
     """Move a final message written outside the job dir into it, then drop the scratch dir.
 
     The copy goes to a staging file that replaces the destination only once complete,
-    so a failed copy never leaves a truncated result. Returns an error string or None.
+    so a failed copy never leaves a truncated result. On failure the scratch dir is
+    kept, so the only copy of the answer survives; the error names its path.
+    Returns an error string or None.
     """
     if not scratch:
         return None
@@ -824,11 +783,12 @@ def collect_output(cli_out: Path, out_path: Path, scratch):
             shutil.copyfile(cli_out, staging)
             os.replace(staging, out_path)
     except OSError as e:
-        err = f"could not copy the final message into the job dir: {e}"
+        err = f"could not copy the final message into the job dir ({e}); it is kept at {cli_out}"
         try:
             staging.unlink()
         except OSError:
             pass
+        return err
     shutil.rmtree(scratch, ignore_errors=True)
     return err
 
@@ -852,8 +812,12 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                 typ = ev.get("type", "")
                 if typ in ("thread.started", "session.created", "session_configured"):
                     session = ev.get("thread_id") or ev.get("session_id") or session
-                elif typ == "item.completed" and (ev.get("item") or {}).get("type") == "agent_message":
-                    last_message = ev["item"].get("text") or ""
+                elif typ in ("item.started", "item.updated", "item.completed"):
+                    item = ev.get("item") or {}
+                    if typ == "item.completed" and item.get("type") == "agent_message":
+                        last_message = item.get("text") or ""
+                    elif item.get("type") not in ("agent_message", "reasoning"):
+                        last_message = None  # later work: an earlier message was progress
                 elif typ == "turn.completed":
                     final_message, last_message = last_message, None
                 elif typ in ("error", "turn.failed"):
@@ -951,7 +915,9 @@ def supervise(job_id: str) -> int:
         fields.update(parse_outputs(job["target"], so_path, out_path, job.get("resume_session")))
         has = out_path.is_file() and out_path.stat().st_size > 0
         if copy_err and not has:
-            fields["error"] = copy_err
+            fields["error"] = copy_err  # scratch kept: it holds the only copy
+        elif copy_err:
+            shutil.rmtree(scratch, ignore_errors=True)  # recovered from the stream instead
         fields["ok"] = fields["exit_code"] == 0 and has and not fields.get("error")
         if not fields["ok"] and not fields.get("error"):
             tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
@@ -1087,7 +1053,6 @@ def sweep(kill: bool = True) -> list:
         update_job(job["id"], status="lost", ended=now_iso(),
                    reason="supervisor exited without finishing" + ("; ended leftover processes" if killed else ""))
         changed.append(job["id"])
-    reclaim_scratch()
     return changed
 
 
