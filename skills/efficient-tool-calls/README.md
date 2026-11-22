@@ -12,6 +12,6 @@ Loads automatically when a task will need many shell or tool calls. The agent ma
 
 ## Results
 
-- The probe result is cached for 7 days in your user cache folder (`efficient-tool-calls/shell-probe.json`), or at `EFFICIENT_TOOL_CALLS_CACHE`.
+- The probe result is cached for 7 days in your user cache folder (`agent-skills/efficient-tool-calls/shell-probe.json`), or at `EFFICIENT_TOOL_CALLS_CACHE`.
 - The skill only recommends a shell. It never changes your harness settings.
 - `--profiles` also times login shells, which runs your shell startup scripts several times.

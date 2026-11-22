@@ -331,16 +331,23 @@ def default_idle():
         return DEFAULT_IDLE
 
 
+def _abs_env(var, default):
+    v = os.environ.get(var, "")
+    return v if v and os.path.isabs(v) else default  # ignore relative values
+
+
 def state_dir():
+    """<user-cache>/agent-skills/browser-control, or $BROWSER_CONTROL_HOME/browser-control."""
     if os.environ.get("BROWSER_CONTROL_HOME"):  # isolate test brokers from the real one
-        base = os.environ["BROWSER_CONTROL_HOME"]
-    elif IS_WIN:
-        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
-    elif IS_MAC:
-        base = os.path.expanduser("~/Library/Caches")
+        d = os.path.join(os.environ["BROWSER_CONTROL_HOME"], "browser-control")
     else:
-        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    d = os.path.join(base, "browser-control")
+        if IS_WIN:
+            base = _abs_env("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
+        elif IS_MAC:
+            base = os.path.expanduser("~/Library/Caches")
+        else:
+            base = _abs_env("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+        d = os.path.join(base, "agent-skills", "browser-control")
     os.makedirs(d, exist_ok=True)
     return d
 

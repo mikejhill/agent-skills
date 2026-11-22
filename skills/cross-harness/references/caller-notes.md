@@ -32,7 +32,7 @@
   process it starts in a Job Object with kill-on-close. If the supervisor dies for any
   reason, Windows ends the whole tree, including MCP servers and shells that the
   agent started.
-- The state home is `%LOCALAPPDATA%\cross-harness`. Set `CROSS_HARNESS_HOME` to move it.
+- The state home is `%LOCALAPPDATA%\agent-skills\cross-harness` on Windows, `~/Library/Caches/agent-skills/cross-harness` on macOS, and `${XDG_CACHE_HOME:-~/.cache}/agent-skills/cross-harness` on Linux. Set `CROSS_HARNESS_HOME` to move it.
 
 ## Environment
 

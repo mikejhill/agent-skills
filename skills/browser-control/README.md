@@ -19,4 +19,4 @@ Loads automatically when a task needs your browser. Examples:
 
 - The browser asks you to approve the connection. One approval covers a background broker that keeps running across tasks until you say you are done, the browser closes, or it has been idle for 60 minutes. The browser shows a "being controlled" banner meanwhile.
 - The agent acts with your logins. It reads first and confirms before actions with side effects such as submitting, buying, or deleting. It never prints cookies or tokens.
-- Broker state lives in your user cache folder (`browser-control`), overridable with `BROWSER_CONTROL_HOME`.
+- Broker state lives in your user cache folder (`agent-skills/browser-control`), overridable with `BROWSER_CONTROL_HOME`.

@@ -13,6 +13,7 @@ Define GitHub Actions standards for any releasable project, regardless of langua
 
 - Mandatory practices: Conventional Commits (validated in CI), GitOps tag-driven releases (tags created only by the release workflow), and Keep a Changelog.
 - At minimum a CI workflow (`push` and `pull_request`) and a release workflow; deploy is optional.
+- Releases are automatic: CI success on the default branch triggers the release workflow. No manual approval gate by default.
 - Release steps run strictly in order, with validation before publishing and no partial releases.
 - Performance: Linux runners, built-in caching, parallel jobs, concurrency control, path filters, and timeouts.
 - Multi-environment matrix builds with `fail-fast: false`.
@@ -25,3 +26,4 @@ Define GitHub Actions standards for any releasable project, regardless of langua
 
 - 2026-11-10: Imported into the SkillSinc library layout. Requirements above are taken from the existing skill.
 - 2026-11-22: [agent] Migrated to the `skill-development` standard. `SKILL.md` cut from 661 lines (over the 500 limit) to about 100. Security, trusted actions, and presentation (reporters, summaries, badges) moved to new references. The release trigger now follows the project's release policy, with `workflow_dispatch` as the default, because `project-setup`'s GitHub profile prefers automatic releases from verified source. The curated action list is marked as needing verification, since several pins in it lag their latest majors.
+- 2026-11-22: [operator] "Release trigger: Prefer automatic releases." Release workflow now runs on `workflow_run` after CI succeeds on a default-branch push; non-releasable pushes end successfully; `workflow_dispatch` kept only for force-patch.

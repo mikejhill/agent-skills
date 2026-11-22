@@ -22,7 +22,7 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 | Workflow | File | Trigger | Job |
 | --- | --- | --- | --- |
 | CI | `ci.yml` | `push` to default branch, `pull_request`, `merge_group` | Validate. Never publishes. |
-| Release | `release.yml` | The project's release policy; `workflow_dispatch` when none is set | Version, tag, release, publish |
+| Release | `release.yml` | Automatic: `workflow_run` after CI succeeds on the default branch. `workflow_dispatch` only as a force-patch escape hatch | Version, tag, release, publish |
 | Deploy (optional) | `deploy.yml` | `release` or `workflow_dispatch` | Promote a release to an environment |
 
 ## CI rules
@@ -41,9 +41,9 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 
 Strictly in order; any failure stops the run:
 
-1. Checkout with `fetch-depth: 0`.
+1. Checkout the commit CI verified (`workflow_run.head_sha`) with `fetch-depth: 0`.
 2. Compute the next version from commits since the last tag (dry run).
-3. Stop if nothing is releasable, unless a force-patch input is set.
+3. If nothing is releasable, end the run successfully without releasing. A manual force-patch run fails instead.
 4. Run the full lint and test suite.
 5. Promote `[Unreleased]` in `CHANGELOG.md`, checking the section exists before and the new header after.
 6. Bump version files (`package.json`, `pyproject.toml`, and so on).

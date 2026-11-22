@@ -15,6 +15,10 @@ ecosystem by replacing the validation, build, and publish steps.
 name: Release
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       force-patch:
@@ -31,12 +35,20 @@ concurrency:
 
 jobs:
   release:
+    # Release only commits that CI verified on the default branch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Determine next version
@@ -45,21 +57,26 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           allow-initial-development-versions: true
-          force-bump-patch-version: ${{ inputs.force-patch }}
+          force-bump-patch-version: ${{ inputs.force-patch || false }}
           dry: true
 
-      - name: Require version bump
-        if: steps.version.outputs.version == ''
+      # Automatic runs with nothing releasable (docs, chore, ci) end here
+      # successfully. A manual run with nothing releasable fails loudly.
+      - name: Require version bump on manual runs
+        if: steps.version.outputs.version == '' && github.event_name == 'workflow_dispatch'
         run: |
           echo "::error::No releasable commits found. Add feat:/fix: commits or use force-patch."
           exit 1
 
       # ── Validation ──────────────────────────────────────────
       # INSERT: ecosystem-specific lint + test steps here.
-      # These MUST pass before any release artifacts are created.
+      # These must pass before any release artifacts are created.
+      # Add `if: steps.version.outputs.version != ''` to every step
+      # from here on, so non-releasable pushes skip them.
       # ────────────────────────────────────────────────────────
 
       - name: Validate CHANGELOG structure
+        if: steps.version.outputs.version != ''
         run: |
           grep -q "^## \[Unreleased\]" CHANGELOG.md || {
             echo "::error::CHANGELOG.md missing [Unreleased] section"
@@ -67,6 +84,7 @@ jobs:
           }
 
       - name: Update CHANGELOG.md
+        if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -83,20 +101,24 @@ jobs:
       # ────────────────────────────────────────────────────────
 
       - name: Commit release changes and push tag
+        if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(release): v$VERSION"
           git tag "v$VERSION"
-          # Push may fail if commits were pushed between checkout and
-          # now (e.g., a PR merged during the release). If this occurs,
-          # re-run the workflow — it will pick up the new commits.
-          git push origin HEAD "v$VERSION"
+          # The push is rejected if the branch moved since CI verified
+          # this commit. That is safe: CI on the newer commit triggers
+          # the next release run, which includes these changes.
+          # GITHUB_TOKEN pushes do not trigger CI, so this cannot loop.
+          git push --atomic origin "HEAD:refs/heads/$BRANCH" "v$VERSION"
 
       - name: Create GitHub Release
+        if: steps.version.outputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.version.outputs.version }}"
@@ -110,6 +132,12 @@ jobs:
       # or use a separate job (see OIDC patterns below).
       # ────────────────────────────────────────────────────────
 ```
+
+### Trigger notes
+
+- `workflow_run` fires only from the workflow file on the default branch, and `workflows:` must match the CI workflow's `name:` exactly.
+- Only `push` runs of CI qualify, so PR runs never release.
+- Every merged `feat`/`fix` releases. To batch releases, merge less often or use a release PR tool such as Release Please; do not add a dispatch button as the gate.
 
 ## Ecosystem-Specific Snippets
 
@@ -139,11 +167,13 @@ appropriate snippets for your ecosystem.
 ```
 
 PyPI publishing uses OIDC trusted publishers and runs as a separate
-job so permissions are scoped:
+job so permissions are scoped. Gate every downstream job on
+`needs.release.outputs.version`, so non-releasable pushes publish nothing:
 
 ```yaml
   pypi:
     needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi
@@ -366,6 +396,7 @@ use GitHub environments with protection rules:
 ```yaml
   deploy-staging:
     needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
@@ -400,10 +431,12 @@ depending on the `release` job:
 ```yaml
   npm:
     needs: release
+    if: needs.release.outputs.version != ''
     # ... npm publish steps
 
   github-packages:
     needs: release
+    if: needs.release.outputs.version != ''
     # ... GitHub Packages publish steps
 ```
 

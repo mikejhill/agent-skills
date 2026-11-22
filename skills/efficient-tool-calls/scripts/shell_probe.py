@@ -15,7 +15,7 @@ shell saves that difference on every call. Measure once per machine; reuse the r
 
 Prints one JSON object: per-shell median/p90 startup in ms, the fastest POSIX shell, the
 fastest PowerShell, and a recommendation. Stdlib only, Python 3.8+. Cache:
-$EFFICIENT_TOOL_CALLS_CACHE, else the user cache dir (efficient-tool-calls/shell-probe.json).
+$EFFICIENT_TOOL_CALLS_CACHE, else <user-cache>/agent-skills/efficient-tool-calls/shell-probe.json.
 """
 import argparse
 import json
@@ -38,13 +38,17 @@ CLOSE_MS = 150  # differences below this are small next to model and harness tim
 def cache_path():
     if os.environ.get("EFFICIENT_TOOL_CALLS_CACHE"):
         return os.environ["EFFICIENT_TOOL_CALLS_CACHE"]
+    def abs_env(var, default):
+        v = os.environ.get(var, "")
+        return v if v and os.path.isabs(v) else default  # ignore relative values
+
     if IS_WIN:
-        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        base = abs_env("LOCALAPPDATA", os.path.join(os.path.expanduser("~"), "AppData", "Local"))
     elif sys.platform == "darwin":
         base = os.path.expanduser("~/Library/Caches")
     else:
-        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    return os.path.join(base, "efficient-tool-calls", "shell-probe.json")
+        base = abs_env("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    return os.path.join(base, "agent-skills", "efficient-tool-calls", "shell-probe.json")
 
 
 def _norm(p):

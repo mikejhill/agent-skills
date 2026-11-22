@@ -21,5 +21,5 @@ The repository's optional Codex review gate (`instructions/codex-via-cross-harne
 ## Security and side effects
 
 - Reviews are read-only unless you ask for fixes (`--fix`). `--post` publishes review results to GitHub or GitLab.
-- Job state and logs live in `%LOCALAPPDATA%\cross-harness` on Windows and `${XDG_STATE_HOME:-~/.local/state}/cross-harness` elsewhere.
+- Job state and logs live in your user cache folder under `agent-skills/cross-harness` (Windows `%LOCALAPPDATA%`, macOS `~/Library/Caches`, Linux `${XDG_CACHE_HOME:-~/.cache}`), overridable with `CROSS_HARNESS_HOME`.
 - Each job uses the other agent's account and usage limits. Whether a second model's review helps is not consistently proven.
