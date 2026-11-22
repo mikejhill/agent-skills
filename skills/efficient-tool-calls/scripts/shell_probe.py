@@ -22,6 +22,7 @@ import math
 import signal
 import socket
 import statistics
+import tempfile
 import subprocess
 import sys
 import threading
@@ -69,14 +70,14 @@ def workspace_root():
         d = parent
 
 
-def find_exe(name, skip=None):
+def find_exe(name, skip=None, exact=False):
     """Look `name` up on PATH, absolute directories only, skipping the workspace (the
     repository around the current directory, or the current directory) and everything under
     it: shutil.which on Windows Python <= 3.11 searches the current directory first, and an
     activated project env puts workspace dirs on PATH. A file that resolves into the workspace
     through a link is skipped too. Best effort: run the probe from a directory you trust."""
     exts = [""]
-    if IS_WIN:
+    if IS_WIN and not exact:  # exact: only `name` itself (e.g. bash.exe, never a bash.cmd wrapper)
         exts = [e for e in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if e]
         if os.path.splitext(name)[1]:
             exts = [""] + exts
@@ -119,7 +120,7 @@ def win_bash():
             except OSError:
                 pass
         return False
-    cands = [find_exe("bash", skip=wsl)]  # the copy a harness running `bash` gets, if on PATH
+    cands = [find_exe("bash.exe", skip=wsl, exact=True)]  # native only: a bash.cmd could forward to WSL  # the copy a harness running `bash` gets, if on PATH
     for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"),
                  os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
         if root and os.path.isabs(root):  # an unset variable must not become a relative path
@@ -243,15 +244,17 @@ def recommend(shells):
     r = {"fastest_posix": px[1] if px else None, "fastest_powershell": ps[1] if ps else None}
     if px and ps:
         diff = ps[0] - px[0]
+        fast, slow = (px[1], ps[1]) if diff > 0 else (ps[1], px[1])
+        path = shells[fast].get("path")
+        fast_s = fast + (" (%s)" % path if path else "")
+        # Both wordings name the faster shell, so a gap near the threshold that lands on the
+        # other side in a re-run changes the strength, never the direction.
         if abs(diff) < CLOSE_MS:
-            r["recommendation"] = ("either: startup differs by %d ms; choose by task (POSIX tools vs cmdlets)"
-                                   % abs(diff))
+            r["recommendation"] = ("either: %s starts %d ms faster than %s, which is small; choose by task "
+                                   "(POSIX tools vs cmdlets)" % (fast_s, abs(diff), slow))
         else:
-            fast, slow = (px[1], ps[1]) if diff > 0 else (ps[1], px[1])
-            path = shells[fast].get("path")
-            r["recommendation"] = ("prefer %s%s for general command-line work: %d ms faster to start per call "
-                                   "than %s; keep %s for work only it can do"
-                                   % (fast, " (%s)" % path if path else "", abs(diff), slow, slow))
+            r["recommendation"] = ("prefer %s for general command-line work: %d ms faster to start per call "
+                                   "than %s; keep %s for work only it can do" % (fast_s, abs(diff), slow, slow))
     else:
         found = [k for k, v in shells.items() if "-" not in v.get("family", "")]
         if px or ps:
@@ -326,12 +329,26 @@ def valid_cache(c, runs):
     return c
 
 
+def _exit_on_signal(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--force", action="store_true", help="measure even if a fresh cached result exists")
     ap.add_argument("--max-age-days", type=float, default=7, help="reuse a cached result up to this old (7)")
     ap.add_argument("--runs", type=int, default=5, help="timed runs per shell (5)")
     a = ap.parse_args(argv)
+    if threading.current_thread() is threading.main_thread():
+        # A harness that cancels with SIGTERM/SIGHUP would otherwise end Python without
+        # unwinding, leaving the sample (in its own session) running: exit through run_once's
+        # cleanup instead.
+        for sig in ("SIGTERM", "SIGHUP"):
+            if hasattr(signal, sig):
+                try:
+                    signal.signal(getattr(signal, sig), _exit_on_signal)
+                except (OSError, ValueError):
+                    pass
     path = cache_path()
     if not a.force:
         try:
@@ -350,8 +367,18 @@ def main(argv=None):
             raise OSError("no shell measured")
         if os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(res, f)
+        d = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".shell-probe-", suffix=".tmp", dir=d)
+        try:  # publish atomically: concurrent readers see the old record or the new one, never half
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(res, f)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     except OSError as e:
         sys.stderr.write("warning: not cached (%s): %s\n" % (path, e))
     res["cached"] = False

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Tests for shell_probe.py: recommendation logic, caching, and a real measurement."""
+import contextlib
+import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +31,10 @@ class Recommend(unittest.TestCase):
         r = sp.recommend({**sh("bash", "posix", 700), **sh("pwsh", "powershell", 350)})
         self.assertIn("prefer pwsh", r["recommendation"])
         self.assertIn("keep bash", r["recommendation"])
+
+    def test_either_still_names_the_faster_shell(self):
+        r = sp.recommend({**sh("bash", "posix", 76), **sh("pwsh", "powershell", 224)})
+        self.assertTrue(r["recommendation"].startswith("either: bash starts 148 ms faster than pwsh"))
 
     def test_close_is_either(self):
         r = sp.recommend({**sh("bash", "posix", 300), **sh("pwsh", "powershell", 380)})
@@ -169,6 +176,49 @@ class Launch(unittest.TestCase):
                 os.environ["PATH"] = oldpath
 
 
+    @unittest.skipUnless(os.name == "nt", "PATHEXT lookup is Windows-only")
+    def test_exact_lookup_ignores_wrappers(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as ws:
+            with open(os.path.join(d, "fakeshell-xyz.cmd"), "w") as f:  # e.g. a bash.cmd forwarding to WSL
+                f.write("@exit /b 0\n")
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            os.chdir(ws)
+            os.environ["PATH"] = os.pathsep.join([d, oldpath])
+            try:
+                self.assertIsNotNone(sp.find_exe("fakeshell-xyz"))
+                self.assertIsNone(sp.find_exe("fakeshell-xyz.exe", exact=True))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    def test_sigterm_ends_the_running_sample(self):
+        import signal as sg
+        with tempfile.TemporaryDirectory() as bindir, tempfile.TemporaryDirectory() as ws:
+            pidfile = os.path.join(ws, "pid")
+            with open(os.path.join(bindir, "bash"), "w") as f:  # a shell whose startup hangs
+                f.write("#!/bin/sh\necho $$ > '%s'\nexec sleep 60\n" % pidfile)
+            os.chmod(os.path.join(bindir, "bash"), 0o755)
+            env = dict(os.environ, PATH=bindir + os.pathsep + "/usr/bin:/bin",
+                       EFFICIENT_TOOL_CALLS_CACHE=os.path.join(ws, "c.json"))
+            p = subprocess.Popen([sys.executable, os.path.abspath(SCRIPT), "--force"], cwd=ws, env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.time() + 20
+                while not os.path.exists(pidfile) and time.time() < deadline:
+                    time.sleep(0.05)
+                time.sleep(0.2)
+                with open(pidfile) as f:
+                    child = int(f.read())
+                p.send_signal(sg.SIGTERM)
+                p.wait(timeout=20)
+                time.sleep(0.3)
+                with self.assertRaises(OSError):
+                    os.kill(child, 0)
+            finally:
+                if p.poll() is None:
+                    p.kill()
+
     def test_whole_repository_is_skipped_from_a_subdirectory(self):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, ".git"))
@@ -208,26 +258,38 @@ class Launch(unittest.TestCase):
 
 
 class Cache(unittest.TestCase):
+    """Cache behaviour with stand-in shells and timings: fast, and runs no real shell or profile."""
     def run_probe(self, *args):
-        p = subprocess.run([sys.executable, SCRIPT, "--runs", "1"] + list(args), capture_output=True,
-                           text=True, env=self.env, timeout=120)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        return json.loads(p.stdout)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(sp.main(["--runs", "1"] + list(args)), 0)
+        return json.loads(out.getvalue())
 
     def setUp(self):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
         self.tmp = td.name
         self.cache = os.path.join(self.tmp, "sub", "probe.json")
-        self.env = dict(os.environ, EFFICIENT_TOOL_CALLS_CACHE=self.cache)
+        for sig in ("SIGTERM", "SIGHUP"):  # main() installs handlers; put the test runner's back
+            if hasattr(signal, sig):
+                self.addCleanup(signal.signal, getattr(signal, sig), signal.getsignal(getattr(signal, sig)))
+        old_env = os.environ.get("EFFICIENT_TOOL_CALLS_CACHE")
+        os.environ["EFFICIENT_TOOL_CALLS_CACHE"] = self.cache
+        self.addCleanup(lambda: os.environ.__setitem__("EFFICIENT_TOOL_CALLS_CACHE", old_env) if old_env
+                        else os.environ.pop("EFFICIENT_TOOL_CALLS_CACHE", None))
+        orig_c, orig_t = sp.candidates, sp.time_one
+        self.addCleanup(setattr, sp, "candidates", orig_c)
+        self.addCleanup(setattr, sp, "time_one", orig_t)
+        sp.candidates = lambda: [("bash", "posix", ["/fake/bash", "-c", "true"]),
+                                 ("pwsh", "powershell", ["/fake/pwsh", "-Command", "exit"])]
+        sp.time_one = lambda argv, runs: {"median_ms": 80 if "bash" in argv[0] else 300, "p90_ms": 400}
 
     def test_measure_then_reuse_then_expire(self):
         first = self.run_probe()
         self.assertFalse(first["cached"])
-        self.assertTrue(first["shells"], "no shell measured")
-        for v in first["shells"].values():
-            self.assertGreaterEqual(v["median_ms"], 0)
+        self.assertEqual(set(first["shells"]), {"bash", "pwsh"})
         self.assertTrue(os.path.isfile(self.cache))
+        self.assertEqual([f for f in os.listdir(os.path.dirname(self.cache)) if f.endswith(".tmp")], [])
         second = self.run_probe()
         self.assertTrue(second["cached"])
         self.assertEqual(second["measured_at"], first["measured_at"])
@@ -240,11 +302,16 @@ class Cache(unittest.TestCase):
         self.assertFalse(self.run_probe("--force")["cached"])
 
     def test_bare_filename_cache(self):
-        self.env["EFFICIENT_TOOL_CALLS_CACHE"] = "probe.json"
-        p = subprocess.run([sys.executable, os.path.abspath(SCRIPT), "--runs", "1"], capture_output=True,
-                           text=True, env=self.env, cwd=self.tmp, timeout=120)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertNotIn("warning", p.stderr)
+        os.environ["EFFICIENT_TOOL_CALLS_CACHE"] = "probe.json"
+        old = os.getcwd()
+        os.chdir(self.tmp)
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                self.run_probe()
+        finally:
+            os.chdir(old)
+        self.assertNotIn("warning", err.getvalue())
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, "probe.json")))
 
     def write_cache(self, obj):
@@ -262,9 +329,7 @@ class Cache(unittest.TestCase):
     def test_more_runs_than_cached_remeasures(self):
         self.run_probe()  # --runs 1
         self.assertTrue(self.run_probe()["cached"])
-        p = subprocess.run([sys.executable, SCRIPT, "--runs", "2"], capture_output=True, text=True,
-                           env=self.env, timeout=120)
-        self.assertFalse(json.loads(p.stdout)["cached"])
+        self.assertFalse(self.run_probe("--runs", "2")["cached"])
 
     def test_changed_inventory_remeasures(self):
         good = self.run_probe()
@@ -330,18 +395,33 @@ class Cache(unittest.TestCase):
             sp.inventory = orig
 
     def test_pwsh_failure_falls_back_to_51(self):
-        orig_c, orig_t = sp.candidates, sp.time_one
         sp.candidates = lambda: [("bash", "posix", ["b"]), ("pwsh", "powershell", ["p"]),
                                  ("powershell", "powershell-5", ["w"])]
         sp.time_one = lambda argv, runs: None if argv == ["p"] else {"median_ms": 100 if argv == ["b"] else 400,
                                                                        "p90_ms": 1}
-        try:
-            r = sp.measure(1)
-        finally:
-            sp.candidates, sp.time_one = orig_c, orig_t
+        r = sp.measure(1)
         self.assertEqual(r["failed"], ["pwsh"])
         self.assertEqual(r["fastest_powershell"], "powershell")
         self.assertIn("prefer bash", r["recommendation"])
+
+
+
+class RealShells(unittest.TestCase):
+    """One end-to-end run against this machine's shells (a minimal system may have none)."""
+    def test_probe_runs_and_caches(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, EFFICIENT_TOOL_CALLS_CACHE=os.path.join(d, "probe.json"))
+            outs = []
+            for _ in range(2):
+                p = subprocess.run([sys.executable, SCRIPT, "--runs", "1"], capture_output=True, text=True,
+                                   env=env, timeout=300)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                outs.append(json.loads(p.stdout))
+            if not outs[0]["shells"]:
+                self.skipTest("no shell measured on this machine")
+            for v in outs[0]["shells"].values():
+                self.assertGreaterEqual(v["median_ms"], 0)
+            self.assertTrue(outs[1]["cached"])
 
 
 if __name__ == "__main__":

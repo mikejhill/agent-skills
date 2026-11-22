@@ -23,6 +23,11 @@ minutes. Spend fewer, better calls.
    helper commands a tool already provides instead of re-writing them each call.
 3. **Bound output.** Filter at the source (`--max`, `head`, `grep`, `Select-Object
    -First`), so results stay small. Large results cost model time on every later turn.
+   In a chain, a pipe reports the filter's status, not the command's: `build | head &&
+   next` runs `next` after a failed build, and `head` can cut a producer short. For steps
+   whose success matters, use the tool's own limit flag, or save the output and filter it
+   afterwards (`build > out.log 2>&1; s=$?; tail -n 40 out.log; test $s -eq 0 && next`;
+   in bash, `set -o pipefail` also works).
 4. **Don't discard output you need.** Many tools report timeouts, warnings, and partial
    failures on stdout; `>/dev/null`, `| Out-Null`, or merging stderr into a discarded
    stream hides them. Filter instead. Discarding stdout that only ever holds noise is
@@ -61,7 +66,8 @@ python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else pyt
 - The recommendation names the executable it measured (on Windows, Git Bash even when
   `bash` on PATH is the WSL launcher). If your harness starts a different copy, the
   numbers don't apply to it.
-- A gap close to 150 ms can come out either side between runs; treat 150–200 ms as a weak
+- A gap close to 150 ms can come out either side between runs (`either` or `prefer`; both
+  name the same faster shell); treat 150–200 ms as a weak
   preference.
 - The result is cached per machine for 7 days, so later calls return at once
   (`"cached": true`). `--force` re-measures. The cache is also skipped when the shells found on
@@ -79,7 +85,7 @@ Then:
 | Situation | Do |
 |---|---|
 | Only one shell tool | Use it; nothing to choose |
-| `recommendation` says `either` (under 150 ms apart) | Pick by task; don't switch for speed |
+| `recommendation` says `either` (under 150 ms apart; it still names the faster shell) | Pick by task; don't switch for speed |
 | Your harness starts shells another way (login bash, PowerShell with profile) | Compare the matching entries (`bash (login)`, `pwsh (profile)`) instead of the bare ones, with the same 150 ms threshold |
 | One shell is faster by 150 ms or more | Use it for general command-line work: `git`, `python`, build and test tools, file reads |
 | Work only one shell does well | Use that shell regardless: cmdlets, the registry, .NET and CIM objects in PowerShell; pipes through `grep`/`sed`/`awk` in a POSIX shell |

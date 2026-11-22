@@ -29,3 +29,7 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
 - 2026-11-22: [agent] Fifth Astra review. PATH skipping covers the whole repository around the
   current directory and links into it; failed shells are part of the cache inventory; WSL launcher
   matched by identity (Sysnative). Documented the trust assumption instead of more path heuristics.
+- 2026-11-22: [agent] Sixth Astra review: Git Bash lookup takes bash.exe only (a bash.cmd may forward
+  to WSL); SIGTERM/SIGHUP unwind through the sample cleanup; atomic cache write; `either` names
+  the faster shell so near-threshold re-runs change strength, not direction; output-bounding
+  rule warns that a pipe hides the producer's status; cache tests use stand-in shells.
