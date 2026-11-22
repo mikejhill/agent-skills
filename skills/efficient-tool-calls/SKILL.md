@@ -54,7 +54,7 @@ python scripts/shell_probe.py          # Windows: python or py -3; else python3
 - It compares against PowerShell 7 (`pwsh`) when installed. Windows PowerShell 5.1 often
   starts faster but lacks `&&`, ternaries and UTF-8 defaults; it is reported for
   information only, and isn't a reason to switch.
-- The result is cached per machine for 30 days, so later calls return at once
+- The result is cached per machine for 7 days, so later calls return at once
   (`"cached": true`). `--force` re-measures; re-measure after installing or upgrading a
   shell, changing antivirus, or when calls feel slower than the cached numbers say.
 - `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more, and

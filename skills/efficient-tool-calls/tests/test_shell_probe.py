@@ -77,7 +77,7 @@ class Cache(unittest.TestCase):
         self.assertEqual(second["measured_at"], first["measured_at"])
         with open(self.cache, encoding="utf-8") as f:
             c = json.load(f)
-        c["measured_at"] = int(time.time()) - 31 * 86400
+        c["measured_at"] = int(time.time()) - 8 * 86400
         with open(self.cache, "w", encoding="utf-8") as f:
             json.dump(c, f)
         self.assertFalse(self.run_probe()["cached"])

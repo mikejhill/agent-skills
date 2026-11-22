@@ -6,7 +6,7 @@ and 600 ms on another (antivirus, MSYS fork emulation, network home dirs), and a
 profile can add a second. Agent harnesses spawn a fresh shell per tool call, so the faster
 shell saves that difference on every call. Measure once per machine; reuse the result.
 
-    python shell_probe.py                 cached result if under 30 days old, else measure
+    python shell_probe.py                 cached result if under 7 days old, else measure
     python shell_probe.py --force         measure now
     python shell_probe.py --max-age-days N
     python shell_probe.py --runs N        timed runs per shell (default 5, plus 1 warm-up)
@@ -143,7 +143,7 @@ def measure(runs):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--force", action="store_true", help="measure even if a fresh cached result exists")
-    ap.add_argument("--max-age-days", type=float, default=30, help="reuse a cached result up to this old (30)")
+    ap.add_argument("--max-age-days", type=float, default=7, help="reuse a cached result up to this old (7)")
     ap.add_argument("--runs", type=int, default=5, help="timed runs per shell (5)")
     a = ap.parse_args(argv)
     path = cache_path()
