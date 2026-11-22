@@ -77,6 +77,8 @@ python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else pyt
 - It runs the shells it finds on PATH. It skips PATH entries inside the current
   repository (or the current directory outside one), but that is best effort: run it from
   a directory you trust, not from an untrusted checkout with an activated environment.
+- The baseline runs no startup code: `BASH_ENV` is unset and zsh gets `-f`. If your harness
+  sets `BASH_ENV`, add that script's cost. `--profiles` keeps its own cache record.
 - With `--profiles`, `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms
   or more, and `login_cost_ms` when a login shell does. They matter only if your harness loads the
   profile for each call.

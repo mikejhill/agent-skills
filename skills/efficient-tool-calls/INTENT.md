@@ -37,3 +37,5 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   runs startup scripts repeatedly; the current subtree stays excluded in a home-rooted repo;
   signals during sample setup are deferred until cleanup is armed; Windows manual fallback names
   Git Bash; smoke test fails when shells exist but every launch fails.
+- 2026-11-22: [agent] Eighth Astra review: baseline runs no startup code (BASH_ENV/ENV unset,
+  zsh -f); `--profiles` has its own cache record; exit 1 when every shell found fails to start.

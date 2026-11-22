@@ -144,8 +144,8 @@ def candidates(profiles=False):
     out = []
     posix = [("bash", win_bash())] if IS_WIN else [(n, find_exe(n)) for n in ("bash", "zsh")]
     for name, p in posix:  # what agent shell tools run (not sh)
-        if p:
-            out.append((name, "posix", [p, "-c", "true"]))
+        if p:  # baseline skips startup files: zsh -f skips .zshenv; BASH_ENV is unset in measure()
+            out.append((name, "posix", [p, "-f", "-c", "true"] if name == "zsh" else [p, "-c", "true"]))
             if profiles:
                 out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
     # Windows PowerShell 5.1 only stands in when pwsh 7 is missing: agent tools run pwsh, and
@@ -246,8 +246,8 @@ def run_once(argv, kw, limit=30):
     return dt if code == 0 else None
 
 
-def time_one(argv, runs):
-    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+def time_one(argv, runs, env=None):
+    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "env": env}
     if IS_WIN:
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     ts = []
@@ -307,9 +307,12 @@ def recommend(shells):
 
 def measure(runs, profiles=False):
     shells, failed, inv = {}, [], {}
+    # Baseline bash runs no startup code: BASH_ENV (and ENV, read in POSIX mode) would run a
+    # user script on every `bash -c`. A harness that sets BASH_ENV pays that on top.
+    bare = {k: v for k, v in os.environ.items() if k not in ("BASH_ENV", "ENV")}
     for name, fam, argv in candidates(profiles):
         inv[name] = argv[0]  # every candidate's executable, measured or failed
-        t = time_one(argv, runs)
+        t = time_one(argv, runs, env=bare if fam == "posix" else None)
         if t:
             shells[name] = dict(t, family=fam, path=argv[0])
         else:  # every launch mode, so a harness using login/profile can see it is unusable
@@ -323,6 +326,8 @@ def measure(runs, profiles=False):
     if failed:
         res["failed"] = failed
     res.update(recommend(shells))
+    if not shells and failed:
+        res["recommendation"] = "every shell found failed to start: %s" % ", ".join(failed)
     return res
 
 
@@ -379,6 +384,9 @@ def main(argv=None):
                 except (OSError, ValueError):
                     pass
     path = cache_path()
+    if a.profiles:  # its own record, so alternating modes doesn't re-run startup scripts
+        root, ext = os.path.splitext(path)
+        path = root + "-profiles" + ext
     if not a.force:
         try:
             with open(path, encoding="utf-8") as f:
@@ -412,7 +420,7 @@ def main(argv=None):
         sys.stderr.write("warning: not cached (%s): %s\n" % (path, e))
     res["cached"] = False
     print(json.dumps(res))
-    return 0
+    return 1 if res.get("failed") and not res["shells"] else 0  # shells exist, none could be timed
 
 
 if __name__ == "__main__":

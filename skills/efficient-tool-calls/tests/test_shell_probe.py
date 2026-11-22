@@ -328,7 +328,7 @@ class Cache(unittest.TestCase):
         self.addCleanup(setattr, sp, "time_one", orig_t)
         sp.candidates = lambda *a: [("bash", "posix", ["/fake/bash", "-c", "true"]),
                                  ("pwsh", "powershell", ["/fake/pwsh", "-Command", "exit"])]
-        sp.time_one = lambda argv, runs: {"median_ms": 80 if "bash" in argv[0] else 300, "p90_ms": 400}
+        sp.time_one = lambda argv, runs, env=None: {"median_ms": 80 if "bash" in argv[0] else 300, "p90_ms": 400}
 
     def test_measure_then_reuse_then_expire(self):
         first = self.run_probe()
@@ -440,10 +440,40 @@ class Cache(unittest.TestCase):
         finally:
             sp.inventory = orig
 
+    def test_profile_mode_has_its_own_record(self):
+        base = self.run_probe()
+        self.assertTrue(self.run_probe("--profiles")["v"])  # writes the -profiles record
+        r = self.run_probe()
+        self.assertTrue(r["cached"])
+        self.assertEqual(r["measured_at"], base["measured_at"])
+        self.assertTrue(self.run_probe("--profiles")["cached"])
+
+    def test_all_launches_failing_exits_nonzero(self):
+        sp.time_one = lambda argv, runs, env=None: None
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sp.main(["--runs", "1"]), 1)
+        r = json.loads(out.getvalue())
+        self.assertIn("failed to start", r["recommendation"])
+        self.assertEqual(sorted(r["failed"]), ["bash", "pwsh"])
+
+    def test_baseline_bash_ignores_bash_env(self):
+        seen = {}
+        def fake(argv, runs, env=None):
+            seen[argv[0]] = env
+            return {"median_ms": 1, "p90_ms": 1}
+        sp.time_one = fake
+        os.environ["BASH_ENV"] = "/tmp/user-startup.sh"
+        try:
+            sp.measure(1)
+        finally:
+            os.environ.pop("BASH_ENV")
+        self.assertNotIn("BASH_ENV", seen["/fake/bash"])
+
     def test_pwsh_failure_falls_back_to_51(self):
         sp.candidates = lambda *a: [("bash", "posix", ["b"]), ("pwsh", "powershell", ["p"]),
                                  ("powershell", "powershell-5", ["w"])]
-        sp.time_one = lambda argv, runs: None if argv == ["p"] else {"median_ms": 100 if argv == ["b"] else 400,
+        sp.time_one = lambda argv, runs, env=None: None if argv == ["p"] else {"median_ms": 100 if argv == ["b"] else 400,
                                                                        "p90_ms": 1}
         r = sp.measure(1)
         self.assertEqual(r["failed"], ["pwsh"])
