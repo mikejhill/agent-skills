@@ -8,10 +8,10 @@ if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -EQ 
 Import-Module PSScriptAnalyzer -RequiredVersion $version
 $files = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
 if ($LASTEXITCODE) { throw 'git ls-files failed' }
-Write-Host "PSScriptAnalyzer: $($files.Count) file(s)"
+Write-Output "PSScriptAnalyzer: $($files.Count) file(s)"
 $findings = @($files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning, Error })
 foreach ($f in $findings) {
-  $path = Resolve-Path -Relative $f.ScriptPath
-  Write-Host "::error file=$path,line=$($f.Line)::$($f.RuleName): $($f.Message)"
+  $path = (Resolve-Path -Relative $f.ScriptPath) -replace "^\.[\\/]", "" -replace "\\", "/"
+  Write-Output "::error file=$path,line=$($f.Line)::$($f.RuleName): $($f.Message)"
 }
 exit [int]($findings.Count -gt 0)
