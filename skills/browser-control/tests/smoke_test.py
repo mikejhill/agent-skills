@@ -85,15 +85,19 @@ def main():
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
     r = Runner(cdp, env)
     try:
-        end = time.time() + 20
-        while True:
-            try:
-                urllib.request.urlopen("http://127.0.0.1:%d/json/version" % cdp, timeout=1).close()
-                break
-            except OSError:
-                if time.time() > end:
-                    sys.exit("browser did not open its debug port: %s" % chrome)
-                time.sleep(0.2)
+        # Wait for both the browser's debug port and the fixture server: on a slow machine the
+        # first page otherwise loads before the fixture server listens.
+        for url, what in (("http://127.0.0.1:%d/json/version" % cdp, "browser did not open its debug port: %s" % chrome),
+                          ("http://127.0.0.1:%d/" % web, "fixture server did not start")):
+            end = time.time() + 20
+            while True:
+                try:
+                    urllib.request.urlopen(url, timeout=1).close()
+                    break
+                except OSError:
+                    if time.time() > end:
+                        sys.exit(what)
+                    time.sleep(0.2)
         print("browser:", chrome)
         code, o, e = r.cli("start", "--idle", "120")
         r.check("start", code == 0 and '"connected"' in o, e)
