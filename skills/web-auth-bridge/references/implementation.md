@@ -49,11 +49,12 @@ from web_auth_bridge import WebAuthBridge, Credentials
 
 
 async def main() -> None:
+    credentials = _load_credentials(config_root("my-skill"))  # never hard-code
     bridge = WebAuthBridge(
         auth_callback=MyServiceAuth(),
-        cache_dir=user_cache("my-skill")  # see SKILL.md,
-        credentials=_load_credentials(config_root("my-skill")),  # never hard-code
-        headless=True,
+        cache_dir=user_cache("my-skill"),  # see SKILL.md
+        credentials=credentials,
+        headless=credentials is not None,  # headed so a person can log in
     )
 
     # Authenticate (uses cache if valid)
@@ -113,7 +114,7 @@ When credentials cannot be stored or the flow requires visual interaction:
 ```python
 bridge = WebAuthBridge(
     auth_callback=MyServiceAuth(),
-    cache_dir=user_cache("my-skill")  # see SKILL.md,
+    cache_dir=user_cache("my-skill"),  # see SKILL.md
     credentials=None,  # No stored credentials
     headless=False,     # User sees the browser
 )

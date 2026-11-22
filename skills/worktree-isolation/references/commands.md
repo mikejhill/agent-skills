@@ -41,9 +41,18 @@ git -C "$wt_path" commit -m "<type>(<scope>): <summary>"
 
 ## Apply
 
+Run one of these, matching the strategy in `SKILL.md`. Never both.
+
+For a PR or review:
+
 ```bash
-git push -u origin "$branch"                      # push for a PR or review
-git -C "$repo_root" merge --no-ff "$branch" -m "merge: <description>"   # direct merge
+git push -u origin "$branch"
+```
+
+For a direct local merge:
+
+```bash
+git -C "$repo_root" merge --no-ff "$branch" -m "merge: <description>"
 ```
 
 ## Clean up

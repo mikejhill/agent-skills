@@ -70,9 +70,9 @@ If the script exits non-zero, report its error to the user and stop. Do not pick
 Do the same steps by hand. If any check fails, stop and report it; do not pick another location.
 
 1. Pick the root from the same candidate list, applying the same qualification (absolute, existing; Windows: inside `%USERPROFILE%`; Unix: check with `ls -ld` that it is yours and not group- or other-writable, or that it has the sticky bit `t` and is owned by you or `root`).
-2. Create the handoff directory inside that root, and only there:
-   - Windows (PowerShell): `$dir = New-Item -ItemType Directory -Force "$root\agent-skills\session-handoff"`; confirm `LinkType` is empty for both `$root\agent-skills` and `$dir`.
-   - Unix: `dir="$root/agent-skills-$(id -u)/session-handoff"; umask 077; mkdir -p "$dir"`; confirm with `ls -ld "$dir" "$(dirname "$dir")"` that both are plain directories, owned by you, mode `drwx------`.
+2. Create the handoff directory inside that root, and only there, one level at a time. Create or verify the parent before creating the child:
+   - Windows (PowerShell): `$parent = New-Item -ItemType Directory -Force "$root\agent-skills"`; confirm its `LinkType` is empty. Then `$dir = New-Item -ItemType Directory -Force "$parent\session-handoff"`; confirm its `LinkType` is empty.
+   - Unix: `umask 077; parent="$root/agent-skills-$(id -u)"; mkdir -p "$parent"`; confirm with `ls -ld "$parent"` that it is a plain directory (not a symlink), owned by you, mode `drwx------`. Then `dir="$parent/session-handoff"; mkdir -p "$dir"` and check `ls -ld "$dir"` the same way.
 3. Create the file exclusively:
    - Windows: `New-Item -ItemType File -Path "$dir\handoff-<stamp>-<slug>.md"`. It fails on any existing entry. If the error says the name exists, try the next suffix, up to 99; on any other error, stop.
    - Unix: `mktemp "$dir/handoff-<stamp>-<slug>.XXXXXX"`. It creates a new `0600` file with a random suffix and fails on any existing entry. The name has no `.md` extension; that is acceptable.

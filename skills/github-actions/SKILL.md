@@ -29,7 +29,7 @@ Produce CI, release, and deploy workflows that are fast, secure, and leave visib
 
 - Parallel jobs, no `needs` without a real dependency: commit lint (PRs only), lint, test, build (no publish). Add a `ci-pass` aggregator job as the single required check ([advanced-patterns.md](references/advanced-patterns.md)).
 - Explicit top-level `permissions` (CI: `contents: read`, `checks: write`, `pull-requests: read`).
-- `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`. Releases use `cancel-in-progress: false`.
+- `concurrency` with `group: ci-${{ github.ref }}` and `cancel-in-progress: true`. Releases use `cancel-in-progress: false`.
 - `paths-ignore` for docs on `push` only. On `pull_request` it can block required checks.
 - `timeout-minutes` on every job, at 2-3 times the expected duration.
 - Linux runners unless the project needs another OS (Windows costs 2x, macOS 10x).
@@ -60,7 +60,7 @@ The release push needs a ruleset bypass or a GitHub App token. Full YAML is in [
 - Never use `pull_request_target` with a checkout of PR code. Use the two-workflow pattern.
 - Grant `id-token: write` and other write scopes per job, only where needed.
 - `GITHUB_TOKEN` events do not trigger other workflows. Use a GitHub App token when one must.
-- Pin actions to the latest major tag, or to a full SHA in release workflows. Verify the tag exists and the action runs on `node24` before using it. Never set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE*` or `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`.
+- Pin actions to the latest major tag, or to a full SHA in release workflows. Verify the tag exists, and that a JavaScript action runs on `node24` (Docker and composite actions have no Node runtime). Never set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE*` or `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`.
 - Use only trusted, maintained actions ([actions.md](references/actions.md)), and enable Dependabot for `github-actions`.
 
 Details: [security.md](references/security.md).

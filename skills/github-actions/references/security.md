@@ -26,7 +26,7 @@ run: echo "PR: $PR_TITLE"
 ```
 
 Any `github.event.*` value that originates from user input (PR title,
-branch name, commit message, issue body) be passed via `env:`,
+branch name, commit message, issue body) goes through `env:`,
 never via `${{ }}` in `run:`.
 
 ## Fork Pull Request Security

@@ -20,3 +20,4 @@ Let agent skills and CLI tools authenticate against websites that require browse
 
 - 2026-11-10: Imported into the SkillSinc library layout. Requirements above are taken from the existing skill.
 - 2026-11-22: [agent] Migrated to the `skill-development` standard. `SKILL.md` cut from 326 to about 50 lines; the implementation guide, CLI pattern, and API reference moved to `references/`. `cache_dir` moved from the config folder to the standard cache location (`<user-cache>/agent-skills/<skill>/`), since cached sessions are rebuildable state; existing caches are not migrated, so the first run after the change logs in again. Removed a hard-coded password from the example. Pointers to `skill-cli-development` now go to `skill-development`'s CLI reference, after that merge.
+- 2026-11-22: [agent] Codex review fixes on the migration: fixed comma placement in two examples; the Step 2 example runs headed when no credentials exist.

@@ -30,9 +30,23 @@ Maintain TypeScript engineering guidance with semantic parity to `python-develop
 - Reuse project-setup, documentation, and release guidance rather than copying generic workflows. The existing asynchronous mutation-testing and threshold-alert policy stays authoritative; no new PR gate.
 - Validate templates only inside isolated fixtures with install scripts disabled: no global installs, credentials, network-policy changes, or real-project changes.
 
+## Preservation
+
+Original seven-file TypeScript skill captured in canonical Git commit `86382d6` before editing. Python skill and shared configuration are read-only inputs to this work. Generated harness copies are updated only by the coordinated scoped SkillSinc distribution.
+
+## Validation record
+
+Baseline environment: Windows, Node 24.7.0. Tools are installed only inside isolated fixtures with install scripts disabled; no global installation, credentials, network-policy changes, or real-project mutation.
+
+- Skill frontmatter/schema and all relative reference links checked.
+- Exact compiler/lint templates and complete source examples exercised in an isolated package: strict source/test typecheck, typed lint, formatter check, behavior tests, declaration build and emitted ESM loading.
+- Independent forward tests cover an npm/CommonJS library, a compiled Node ESM CLI/service, and a two-package pnpm workspace; detailed outcomes and remaining platform limits are recorded in the task's validation report.
+- Browser/framework, dual-output packaging, native type stripping, other OSes and additional supported runtimes are criteria-based profiles, not certified complete templates.
+
+Consult current primary documentation linked in references before upgrading. Exact tool pins record tested compatibility, not a permanent recommendation to use an old patch.
+
 ## Log
 
-- 2026-04-10: Initial Biome, tsx, use-case, and CLI profiles, with fnm runtime guidance.
-- 2026-10-29: Reviewed against the Python skill. Original seven-file skill preserved in commit `86382d6` before editing. Added modular boundaries, comprehensive typing and typed lint, runtime and package discipline, compatible module profiles, and isolated forward tests. Corrected invalid Biome 2 keys, emitted-extension examples, unsafe JSON casts, and parser side effects.
-- 2026-10-29: [agent] Validation baseline: Windows, Node 24.7.0. TypeScript 6.0.3, because typescript-eslint 8.72.1 requires `>=4.8.4 <6.1.0`. Templates and examples passed strict source and test typecheck, typed lint, format check, behaviour tests, declaration build, and emitted ESM loading. Forward tests covered an npm CommonJS library, a compiled Node ESM CLI or service, and a two-package pnpm workspace. Browser and framework, dual-output packaging, native type stripping, other OSes, and other runtimes are criteria-based profiles, not certified templates. Exact pins record tested compatibility, not a permanent recommendation.
-- 2026-11-22: [agent] Migrated to the `skill-development` standard: INTENT restructured into Goals, Requirements, and Log without changing content; shorter description; README added.
+- 2026-04-10: Initial Biome/tsx/use-case/CLI profiles and fnm runtime guidance.
+- 2026-10-29: Review against actual Python skill; preserve original; add modular boundaries, comprehensive typing/typed lint, runtime/package discipline, compatible module profiles and isolated forward tests. Correct invalid Biome 2 keys, emitted extension examples, unsafe JSON casts and parser side effects.
+- 2026-11-22: [agent] Migrated to the `skill-development` standard: Goals and Requirements sections added from the existing content; shorter description; README added. Preservation, validation record, and log entries kept verbatim.

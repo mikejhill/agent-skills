@@ -27,7 +27,7 @@ Record why a decision was made: the forces, the real alternatives, and the trade
 
 ## Workflow
 
-For an existing ADR, skip to step 6 with that ADR as the draft.
+To review an existing ADR, run step 3 for facts when the system's code is at hand (otherwise omit the critique prompt's facts section and say the system claims are unverified), then step 6 with that ADR as the draft. Return the findings and stop. Revise only when the user asks; an accepted ADR changes only through a superseding ADR.
 
 1. **Find existing ADRs** (`docs/decisions/`, `docs/adr/`, or `NNNN-*.md` files) and read them for history, numbering, and conflicts. If none exist, propose `docs/decisions/` and offer an ADR-0000 recording the adoption of ADRs.
 2. **Ask for related artifacts** such as an RFC or design doc, and read them.
