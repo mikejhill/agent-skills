@@ -1,0 +1,25 @@
+# Intent
+
+Help any agent spend fewer, cheaper tool calls on multi-step work, from a timing study
+of real browser-automation sessions: model turns (~4 s median per call, ~0.3 s more per
+100 command characters) and harness shell spawns (~0.9 s per Bash call, ~1.8 s per
+PowerShell call on one Windows machine) dominated, not the commands themselves.
+
+## Goals
+
+1. General, harness-neutral rules for cutting per-call cost: batch predictable steps,
+   short commands, bounded output, no discarded output, no sleep-polling, reuse helpers.
+2. Shell choice from measurement, not assumption: startup cost varies by machine (Git
+   Bash can be slower than PowerShell elsewhere), so the skill measures once per machine,
+   caches it, and recommends; task fit still wins over speed.
+3. Zero dependencies and cheap to run: one stdlib Python script, a cached answer on
+   repeat calls, and a manual fallback without Python.
+4. Never change the user's harness settings; recommend only.
+
+## Log
+
+- 2026-11-21: [agent] Created from the browser-control timing study (handoff item 6).
+  Operator asked to account for environment-dependent shell performance: Git Bash may
+  start slower than PowerShell on other machines. Added `scripts/shell_probe.py` (per-shell
+  median/p90 startup, profile cost, 30-day per-host cache, 150 ms "either" threshold) and
+  unit tests.
