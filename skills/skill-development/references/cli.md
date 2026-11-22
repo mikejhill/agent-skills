@@ -29,15 +29,15 @@ One cohesive domain per CLI. Cover every operation the agent needs in that domai
 
 ## Tiers
 
-**Lightweight:** one file, `scripts/<name>.py` (or `.mjs` to wrap npm tooling). `argparse`, help in the header docstring, no persistent state or credentials. At most 300 lines and two subcommands. Verified by running it. Example: `mermaid-diagrams/scripts/mermaid-export.mjs`.
+**Lightweight:** one file, `scripts/<name>.py` (or `.mjs` to wrap npm tooling). `argparse`, help in the header docstring, no persistent state or credentials. At most 300 lines and two subcommands. Verified by running it.
 
-**Standard:** a project in `scripts/<name>/`, following `python-development` or `typescript-development`: strict types, lint, format, tests (at least a success and an error case per subcommand), a lockfile, a `.gitignore`, and `--version`. All checks pass before each commit.
+**Standard:** a project in `scripts/<name>/`. Code style, tooling, and testing follow whatever standards the user has for that language; this skill does not set them. What a skill CLI adds: a committed lockfile, a `.gitignore` for build output and environments, and `--version`.
 
 Graduate to Standard as soon as any holds: over 300 lines, persistent config or credentials, more than two subcommands, logic that needs unit tests, or dependencies that must be installed. Graduation is one-way.
 
 ```text
 scripts/<name>/                 # Standard, Python
-├── pyproject.toml              # deps, ruff and ty config
+├── pyproject.toml              # metadata and dependencies
 ├── uv.lock
 ├── src/<package>/{__init__,__main__,cli,<domain>}.py
 └── tests/test_<domain>.py

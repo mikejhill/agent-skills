@@ -8,7 +8,7 @@ Add a script when the agent would otherwise repeat a fragile multi-step sequence
 scripts/<name>.py         # single-file CLI (default)
 scripts/<name>.mjs        # Node.js, only to wrap npm tooling
 scripts/<name>/           # full project, once a CLI outgrows one file
-tests/test_<name>.py      # stdlib unittest
+tests/                    # tests for the scripts
 ```
 
 Document the exact invocation in `SKILL.md`, resolving from the skill folder:

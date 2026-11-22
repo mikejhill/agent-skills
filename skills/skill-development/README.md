@@ -7,7 +7,7 @@ Standards and a checker for building agent skills: naming, frontmatter, layout, 
 Loads automatically when an agent creates, revises, renames, or reviews a skill. Examples:
 
 - "Create a skill for our release process."
-- "Review skills/browser-control against the skill standards."
+- "Review skills/my-skill against the skill standards."
 
 Run the checker yourself on one skill or a folder of skills. `<skill-dir>` is the folder holding this skill's `SKILL.md`: wherever your harness installed it, or `skills/skill-development` in a library checkout.
 

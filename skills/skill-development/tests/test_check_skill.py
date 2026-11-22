@@ -134,6 +134,46 @@ class CheckSkillTest(unittest.TestCase):
         d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body=body)
         self.assertEqual(levels(d), [])
 
+    def test_coupling_warning(self) -> None:
+        make_skill(self.root, "other-skill", "name: other-skill\ndescription: D.\n")
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n",
+                       body="Follow the `other-skill` skill for style.\n\n```\nother-skill skill\n```\n")
+        self.assertTrue(any(l == "warning" and "'other-skill'" in m for l, m in levels(d)))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow any standards the user has for style.\n\n```\nother-skill skill `other-skill`\n```\n", encoding="utf-8")
+        self.assertEqual(levels(d), [])
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollowing `other-skill` for frameworks.\n", encoding="utf-8")
+        self.assertTrue(any("'other-skill'" in m for _, m in levels(d)))
+
+    def test_coupling_paths_and_filenames(self) -> None:
+        make_skill(self.root, "session-handoff", "name: session-handoff\ndescription: D.\n")
+        make_skill(self.root, "project-setup", "name: project-setup\ndescription: D.\n")
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body="Run `python3 ../session-handoff/scripts/x.py`.\n")
+        self.assertTrue(any("'session-handoff'" in m for _, m in levels(d)))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow python-project-setup.instructions.md.\n", encoding="utf-8")
+        msgs = [m for _, m in levels(d)]
+        self.assertTrue(any("instruction 'python-project-setup'" in m for m in msgs))
+        self.assertFalse(any("skill 'project-setup'" in m for m in msgs))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\n```bash\npython3 ../session-handoff/scripts/x.py\n```\nRead `../project-setup-fixtures/in.json`.\nSet `package-ecosystem: project-setup`.\n", encoding="utf-8")
+        msgs = [m for _, m in levels(d)]
+        self.assertTrue(any("'session-handoff'" in m for m in msgs))
+        self.assertFalse(any("'project-setup'" in m for m in msgs))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nRun `python3 \"<skill-dir>/../session-handoff/x.py\"`.\nApply the project-setup metadata schema.\nCreate acme.instructions.md as the output file.\n```\ncat ../../instructions/general.instructions.md\n```\n", encoding="utf-8")
+        msgs = [m for _, m in levels(d)]
+        self.assertTrue(any("'session-handoff'" in m for m in msgs))
+        self.assertTrue(any("skill 'project-setup'" in m for m in msgs))
+        self.assertTrue(any("'general'" in m for m in msgs))
+        self.assertFalse(any("'acme'" in m for m in msgs))
+
+    def test_coupling_instruction_names(self) -> None:
+        (self.root / "instructions").mkdir()
+        (self.root / "instructions" / "general.instructions.md").write_text("# g\n", encoding="utf-8")
+        skills = self.root / "skills"
+        skills.mkdir()
+        d = make_skill(skills, "s", "name: s\ndescription: D.\n", body="Follow the user's general instructions.\n")
+        self.assertEqual(levels(d), [])
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nSee general.instructions.md.\n", encoding="utf-8")
+        self.assertTrue(any("'general'" in m for _, m in levels(d)))
+
     def test_main_exit_codes(self) -> None:
         make_skill(self.root, "ok", "name: ok\ndescription: D.\n")
         self.assertEqual(check_skill.main([str(self.root), "--json"]), 0)

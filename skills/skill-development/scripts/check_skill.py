@@ -193,6 +193,22 @@ def sidecar_disables_implicit(text: str) -> bool:
     return found
 
 
+def strip_code_blocks(text: str) -> str:
+    """Drop fenced code blocks but keep inline code."""
+    out: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines():
+        m = FENCE_RE.match(line.strip())
+        if fence is None:
+            if m:
+                fence = (m.group(1)[0], len(m.group(1)))
+                continue
+            out.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and not line.strip()[len(m.group(1)):].strip():
+            fence = None
+    return "\n".join(out)
+
+
 def strip_code(text: str) -> str:
     """Drop fenced code blocks and inline code so links inside them are ignored."""
     out: list[str] = []
@@ -251,6 +267,7 @@ class Checker:
         self.check_intent()
         self.check_layout()
         self.check_links()
+        self.check_coupling()
         return self.findings
 
     def check_name(self, name: str) -> None:
@@ -314,6 +331,46 @@ class Checker:
                 if p.is_file() and p.parent != refs:
                     self.add("warning", f"{p.relative_to(self.root).as_posix()} is nested; keep references one level deep")
 
+    def check_coupling(self) -> None:
+        """Warn when agent-facing text names a sibling skill or instruction file."""
+        names = coupling_names(self.root)
+        docs = [self.root / "SKILL.md"]
+        refs = self.root / "references"
+        if refs.is_dir():
+            docs += sorted(refs.glob("*.md"))
+        for doc in docs:
+            text = self.read(doc) if doc.is_file() else None
+            if text is None:
+                continue
+            prose = strip_code_blocks(text)
+            where = doc.relative_to(self.root).as_posix()
+            hits: set[tuple[str, str]] = set()
+            # Any instruction filename is an explicit dependency, installed or not.
+            # An instruction file the skill reads or follows (not one it creates), installed or not.
+            for line in text.splitlines():
+                for m in re.finditer(r"(?<![\w.-])([a-z0-9]+(?:-[a-z0-9]+)*)\.instructions\.md\b", line):
+                    before = line[: m.start()]
+                    if re.search(r"\b(?:create|write|generate|add|produce|output)\b", before, re.I):
+                        continue
+                    if re.search(r"\.\.[/\\]|\b(?:follow|see|per|read|load|apply|cat|according to|defined in|from)\b", before, re.I):
+                        hits.add(("instruction", m.group(1)))
+            for kind, name in names:
+                e = re.escape(name)
+                bare = rf"(?<![\w.-]){e}(?![\w-]|\.instructions)"
+                # A one-word name ("general") counts only in inline code; a hyphenated one also bare.
+                n = rf"(?:`{e}`|{bare})" if "-" in name else rf"`{e}`"
+                # Paths into a sibling folder break wherever it is absent, even in code blocks.
+                path = rf"(?:^|[\s`'\"(=/\\>])(?:\.\./|\.\.\\)+{e}(?=[/\\`'\")\s]|$)"
+                # Prose that names it as a type, or as the thing to follow.
+                ctx = (rf"{n}(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+{n}"
+                       rf"|\b{kind}s?\s*\(?(?:such as|e\.g\.,?|like)\s+{n}"
+                       rf"|\b(?:follow(?:ing|s)?|see|per|use|using|defer to|load|apply)\s+(?:the\s+)?{n}"
+                       rf"|{n}\s+(?:[\w-]+\s+)?(?:schema|rules|conventions|standards|guidance|format|template)s?\b")
+                if re.search(path, text, re.M) or re.search(ctx, prose, re.I):
+                    hits.add((kind, name))
+            for kind, name in sorted(hits):
+                self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
+
     def check_links(self) -> None:
         docs = [self.root / "SKILL.md", self.root / "README.md"]
         refs = self.root / "references"
@@ -339,6 +396,20 @@ class Checker:
                     self.add("error", f"{where}: broken link '{target}'")
                 elif resolved != self.root and self.root not in resolved.parents:
                     self.add("error", f"{where}: link '{target}' leaves the skill folder and breaks once installed")
+
+
+def coupling_names(skill_root: Path) -> list[tuple[str, str]]:
+    """Sibling skills and library instruction files a skill could name, as (kind, name)."""
+    names: list[tuple[str, str]] = []
+    parent = skill_root.parent
+    try:
+        names += [("skill", d.name) for d in parent.iterdir() if d != skill_root and (d / "SKILL.md").is_file()]
+        instructions = parent.parent / "instructions"
+        if instructions.is_dir():
+            names += [("instruction", f.name.split(".")[0]) for f in instructions.glob("*.instructions.md")]
+    except OSError:
+        pass
+    return names
 
 
 def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:
