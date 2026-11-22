@@ -85,6 +85,14 @@ The description is the only text an agent sees before it decides to load the ski
 - Keep it harness-neutral. Say "run", "read", or "edit", not harness tool names, slash commands, or harness paths. If a skill truly needs one harness, set `compatibility` and say so at the top of `README.md`.
 - Aim for 200 lines or fewer in `SKILL.md`. The spec's hard limit is 500.
 
+## Scope and composition
+
+Each skill must stand alone. A user may install it without any of its neighbours.
+
+- Never name another skill, instruction file, or agent as a dependency or a source of rules. Refer to it by capability instead, for example "follow any standards the user has for Python development".
+- Cover only the skill's own subject. Do not set rules for adjacent domains, such as code style, testing, or commit conventions, that other skills or user instructions may own. State only what this subject needs on top of them.
+- Copy a small piece of shared logic in, rather than linking to it in another skill's folder.
+
 ## Progressive disclosure
 
 Keep in `SKILL.md` only what every run needs. Move everything else out, and link each file with a one-line "read when" trigger:
@@ -103,7 +111,7 @@ Keep in `SKILL.md` only what every run needs. Move everything else out, and link
 | --- | --- |
 | Scratch output tied to a workspace | `<workspace>/.tmp/<skill-name>/` (gitignored) |
 | Temp output with no workspace, or for the user | `<system-temp>/agent-skills/<skill-name>/` (Unix: `agent-skills-<uid>`) |
-| Working directories with no workspace (clones, verification) | `<scratch-root>/<kind>-<YYYYMMDD-HHMMSS>-<slug>/` (see `temp-storage`), removed when the task ends |
+| Working directories with no workspace (clones, verification) | `<system-temp>/agent-skills/scratch/<kind>-<YYYYMMDD-HHMMSS>-<slug>/` (Unix: `agent-skills-<uid>`), removed when the task ends |
 | User configuration | `~/.config/agent-skills/<skill-name>/` |
 | Cache and persistent state | `<user-cache>/agent-skills/<skill-name>/` |
 
@@ -120,7 +128,8 @@ Read [scripts.md](references/scripts.md) before writing or changing a script, an
 
 ## Checklist
 
-- [ ] `python3 "<skill-dir>/scripts/check_skill.py" <target-skill-folder>` passes with no errors. It checks the name, frontmatter, sizes, required files, links, and gerunds.
+- [ ] `python3 "<skill-dir>/scripts/check_skill.py" <target-skill-folder>` passes with no errors. It checks the name, frontmatter, sizes, required files, links, gerunds, and references to sibling skills.
+- [ ] Nothing names another skill or instruction file, and no rule belongs to a different subject.
 - [ ] `npx markdownlint-cli2` passes for the skill's Markdown, if the repository uses it.
 - [ ] Description test: five requests, including near-misses, are judged correctly from the description alone.
 - [ ] One realistic task run follows the skill without loading references it did not need.

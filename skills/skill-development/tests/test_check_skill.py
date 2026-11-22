@@ -134,6 +134,14 @@ class CheckSkillTest(unittest.TestCase):
         d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body=body)
         self.assertEqual(levels(d), [])
 
+    def test_coupling_warning(self) -> None:
+        make_skill(self.root, "other-skill", "name: other-skill\ndescription: D.\n")
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n",
+                       body="Follow the `other-skill` skill for style.\n\n```\nother-skill skill\n```\n")
+        self.assertTrue(any(l == "warning" and "'other-skill'" in m for l, m in levels(d)))
+        (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollow any standards the user has for style.\n", encoding="utf-8")
+        self.assertEqual(levels(d), [])
+
     def test_main_exit_codes(self) -> None:
         make_skill(self.root, "ok", "name: ok\ndescription: D.\n")
         self.assertEqual(check_skill.main([str(self.root), "--json"]), 0)

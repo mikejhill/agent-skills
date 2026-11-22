@@ -193,6 +193,22 @@ def sidecar_disables_implicit(text: str) -> bool:
     return found
 
 
+def strip_code_blocks(text: str) -> str:
+    """Drop fenced code blocks but keep inline code."""
+    out: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines():
+        m = FENCE_RE.match(line.strip())
+        if fence is None:
+            if m:
+                fence = (m.group(1)[0], len(m.group(1)))
+                continue
+            out.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and not line.strip()[len(m.group(1)):].strip():
+            fence = None
+    return "\n".join(out)
+
+
 def strip_code(text: str) -> str:
     """Drop fenced code blocks and inline code so links inside them are ignored."""
     out: list[str] = []
@@ -251,6 +267,7 @@ class Checker:
         self.check_intent()
         self.check_layout()
         self.check_links()
+        self.check_coupling()
         return self.findings
 
     def check_name(self, name: str) -> None:
@@ -314,6 +331,27 @@ class Checker:
                 if p.is_file() and p.parent != refs:
                     self.add("warning", f"{p.relative_to(self.root).as_posix()} is nested; keep references one level deep")
 
+    def check_coupling(self) -> None:
+        """Warn when agent-facing text names a sibling skill or instruction file."""
+        names = coupling_names(self.root)
+        if not names:
+            return
+        docs = [self.root / "SKILL.md"]
+        refs = self.root / "references"
+        if refs.is_dir():
+            docs += sorted(refs.glob("*.md"))
+        for doc in docs:
+            text = self.read(doc) if doc.is_file() else None
+            if text is None:
+                continue
+            prose = strip_code_blocks(text)
+            for kind, name in names:
+                n = re.escape(name)
+                pattern = rf"`?\b{n}\b`?(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+`?\b{n}\b`?|`{n}`\s*\("
+                if re.search(pattern, prose, re.I):
+                    where = doc.relative_to(self.root).as_posix()
+                    self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
+
     def check_links(self) -> None:
         docs = [self.root / "SKILL.md", self.root / "README.md"]
         refs = self.root / "references"
@@ -339,6 +377,20 @@ class Checker:
                     self.add("error", f"{where}: broken link '{target}'")
                 elif resolved != self.root and self.root not in resolved.parents:
                     self.add("error", f"{where}: link '{target}' leaves the skill folder and breaks once installed")
+
+
+def coupling_names(skill_root: Path) -> list[tuple[str, str]]:
+    """Sibling skills and library instruction files a skill could name, as (kind, name)."""
+    names: list[tuple[str, str]] = []
+    parent = skill_root.parent
+    try:
+        names += [("skill", d.name) for d in parent.iterdir() if d != skill_root and (d / "SKILL.md").is_file()]
+        instructions = parent.parent / "instructions"
+        if instructions.is_dir():
+            names += [("instruction", f.name.split(".")[0]) for f in instructions.glob("*.instructions.md")]
+    except OSError:
+        pass
+    return names
 
 
 def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:
