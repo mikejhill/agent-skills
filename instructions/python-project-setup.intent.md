@@ -9,7 +9,13 @@ Give Python projects one setup profile (uv, required files, layout) that layers 
 
 ## Requirements
 
-- Build tool is `uv`; `pyproject.toml`, `.python-version`, and a committed `uv.lock` are required.
+- Build tool is `uv` always, except for throwaway scripts.
+- Required files: `pyproject.toml`, `.python-version`, and a committed `uv.lock`.
+- Forbidden files: `main.py`, `setup.py`, `setup.cfg`, `Pipfile`, `requirements.txt`.
+- Layout: `src/<package>/` for source and `tests/` for tests.
+- Dev tools go in `[dependency-groups]` (PEP 735), not `[project.optional-dependencies]`.
+- Run everything with `uv run <command>`; global CLIs via `uv tool install`.
+- The virtual environment is managed by uv (`uv sync`), never created by hand.
 - No coupling: refer to other standards by capability, never by name.
 
 ## Log

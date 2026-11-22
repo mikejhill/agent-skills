@@ -23,3 +23,4 @@ Let agent skills and CLI tools authenticate against websites that require browse
 - 2026-11-22: [agent] Codex review fixes on the migration: fixed comma placement in two examples; the Step 2 example runs headed when no credentials exist.
 - 2026-11-22: [agent] Removed named references to other skills and instruction files; adjacent concerns are now described by capability ("any ... standards the user has") so the skill stands alone.
 - 2026-11-22: [agent] Codex review: kept the safeguards that used to come from the removed references inline (review-clone cleanup checks and scratch defaults, credential file permissions, verifying release prerequisites).
+- 2026-11-22: [agent] Codex round 2: config and cache resolution (ignore relative overrides, per-OS cache base) now stated inline.

@@ -33,10 +33,15 @@ and 2.1.327.
 | A different repository | `--cwd PATH` |
 
 For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current. With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`,
+current, and fetch the PR head into a remote-tracking ref
+(`git fetch origin pull/<n>/head:refs/remotes/origin/pr/<n>`), not only `FETCH_HEAD`, so the
+cleanup check below sees its commits as already on a remote. With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`,
 where `<scratch-root>` is the user's scratch location if their instructions define one, else
 `%TEMP%\agent-skills\scratch\` on Windows or `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/`
-elsewhere (parent owned by you, mode `0700`, not a symlink). Reuse the clone for later review
+elsewhere. The temp base must be absolute; `agent-skills-<uid>` must be owned by you with
+mode `0700`; no component below the base (`agent-skills…`, `scratch`, the clone) may be a
+symlink or junction; and the resolved clone path must sit inside the scratch root. Check
+this before creating or removing anything there, and stop if it fails. Reuse the clone for later review
 rounds. When the review loop ends, also when it fails, remove it only after confirming it
 holds no unique work: no working-tree edits, untracked files, stashes, or unpushed commits.
 After a `--fix` run, move the fixes to the intended checkout first. If any check finds
