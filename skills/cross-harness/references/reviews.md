@@ -32,12 +32,23 @@ and 2.1.327.
 | Uncommitted work | default, or `--uncommitted` |
 | A different repository | `--cwd PATH` |
 
-For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current. With no local clone, clone into the scratch root defined by the
-`temp-storage` instruction (`<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`), reuse it
-for later review rounds, and remove it when the review loop ends, also when it fails.
-After a `--fix` run, move the fixes to the intended checkout (or keep the clone and
-report its path) before removing it.
+For a PR, fetch first, so the base is current, and fetch the PR head into a
+remote-tracking ref rather than only `FETCH_HEAD`: on GitHub
+`git fetch origin refs/pull/<n>/head:refs/remotes/origin/pr/<n>`, on GitLab
+`git fetch origin refs/merge-requests/<n>/head:refs/remotes/origin/mr/<n>`. Review from a
+checkout of that ref, preferably a worktree of the user's existing clone. On every round,
+confirm the checkout's `HEAD` equals the fetched ref before starting the job; if it is
+behind and clean, move it to the ref, and if it has local edits, stop and report.
+
+With no local clone, put the clone wherever the user's scratch or temporary-file rules say.
+If they have none, ask the user where to clone rather than picking a location.
+
+When the review loop ends, also when it fails, remove only a clone or worktree you
+created, and only after confirming it holds no unique work, in it and in every nested
+checkout (submodules): no working-tree edits, untracked files, stashes, or unpushed
+commits (`git log HEAD --branches --not --remotes`). After a `--fix` run, move the fixes to
+the intended checkout first. If any check finds unique work or cannot run, keep it and
+report its path.
 
 ## Fixing: `--fix`
 

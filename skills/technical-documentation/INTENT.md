@@ -25,3 +25,4 @@ Make agents write documentation that readers can scan and act on, and organize p
 
 - 2026-11-10: Imported into the SkillSinc library layout as `technical-writing` and `project-documentation`. Requirements above are taken from those skills.
 - 2026-11-22: [agent] Merged both into `technical-documentation` during the migration to the `skill-development` standard. Each skill's description pointed at the other, they split one job (writing docs) by an unclear line, and "writing" is a gerund. Moved the JSON Schema to `assets/`, profile rules to `references/structure.md`, and STE sources to `references/writing.md`.
+- 2026-11-22: [agent] Removed named references to other skills and instruction files; adjacent concerns are now described by capability ("any ... standards the user has") so the skill stands alone.

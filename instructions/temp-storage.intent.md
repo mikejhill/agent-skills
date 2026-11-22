@@ -47,3 +47,4 @@ when to remove them, so nothing they create outlives its task on the user's mach
   path (macOS `/tmp` is a link) and every ancestor must be trusted. Stopped after four
   rounds, as with PRs #23 and #24, since later rounds found edge cases in the previous
   round's fixes.
+- 2026-11-22: [agent] Dropped the named references to other skills from the scope note (no coupling between library items).

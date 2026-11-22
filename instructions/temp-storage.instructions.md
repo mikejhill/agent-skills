@@ -32,8 +32,7 @@ Disposable working directories you create outside the current workspace go under
 scratch root, never in the user's project folders, home folder, or loose in the system
 temp folder. Examples: a clone to review or test a branch, a verification or repro
 directory, a build of another repository. Worktrees, caches, and persistent state such
-as job directories keep their own locations and cleanup rules (see the
-`worktree-isolation` and `skill-development` skills).
+as job directories keep their own locations and cleanup rules.
 
 | OS | Scratch root |
 | --- | --- |

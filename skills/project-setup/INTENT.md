@@ -26,3 +26,4 @@ Build the smallest maintainable project that its users can discover, run, test, 
 - 2026-11-10: Imported into the SkillSinc library layout. Requirements above are taken from the existing skill and its GitHub profile.
 - 2026-11 (PR #8): GitHub Actions workflows may open release PRs; setup configures this instead of opening bot PRs by hand.
 - 2026-11-22: [agent] Migrated to the `skill-development` standard: clearer description, a reference index, README and INTENT. No rule changes.
+- 2026-11-22: [agent] Removed named references to other skills and instruction files; adjacent concerns are now described by capability ("any ... standards the user has") so the skill stands alone.

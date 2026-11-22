@@ -16,7 +16,7 @@ Build the smallest maintainable project that its users can discover, run, test, 
 - Inspect existing conventions and applicable profiles before changing structure. Preserve working ecosystem conventions.
 - Keep responsibilities modular. Separate reusable logic from delivery interfaces and external integrations; avoid layers without a concrete purpose.
 - Put purpose, audience, quick start, supported use, and canonical documentation links in root `README.md`. Verify commands before presenting them as working.
-- Use `docs/` for deeper project knowledge. Follow the technical-documentation skill for structure and wording.
+- Use `docs/` for deeper project knowledge. Follow any documentation standards the user has for structure and wording.
 - Keep conventional root files where tools expect them: `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `AGENTS.md` as applicable. Create only files with a real purpose. Confirm license intent rather than inventing it.
 - Keep build/package manifests and tool configuration at their conventional paths. Profiles choose source/test layout, lockfiles, formatters, and language tools.
 - Ignore local secrets, build outputs, and temporary artifacts. Use the existing temporary-storage convention. Do not commit credentials or private organizational examples.

@@ -9,7 +9,7 @@ description: >-
 
 # GitHub Actions
 
-Produce CI, release, and deploy workflows that are fast, secure, and leave visible evidence. Repository settings (rulesets, required checks, release permissions) follow the `project-setup` skill.
+Produce CI, release, and deploy workflows that are fast, secure, and leave visible evidence. Configuring repository settings (rulesets, required checks, release permissions) is out of scope; follow any repository-setup standards the user has. Still verify the settings these workflows depend on, such as the `v*` tag ruleset and the release-push bypass, and report any that are missing.
 
 ## Required practices
 

@@ -22,3 +22,4 @@ Make agents write tests that prove one behavior each, fail with a message that p
 
 - 2026-11-10: Imported into the SkillSinc library layout as `testing-standards`. Requirements above are taken from that skill.
 - 2026-11-22: [agent] Renamed to `test-design` during the migration to the `skill-development` standard ("testing" is a gerund). Rewrote `SKILL.md` from 414 to about 100 lines: dropped the persona, the MUST/MUST NOT lists, and the validation section that repeated the rules. The anti-pattern catalog, coverage workflow, framework stubbing, and examples moved to `references/`.
+- 2026-11-22: [agent] Removed named references to other skills and instruction files; adjacent concerns are now described by capability ("any ... standards the user has") so the skill stands alone.

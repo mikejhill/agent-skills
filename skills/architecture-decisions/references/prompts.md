@@ -81,7 +81,7 @@ Evaluate the ADR draft against each criterion below:
 9. Future reader test: Would a new team member joining in 2 years understand
    WHY this choice was made from the ADR alone?
 10. Template compliance: Are all required sections present? Is the frontmatter
-    complete under the technical-documentation schema, with actual decision-makers recorded in extensions? Does the title follow the
+    complete under the template and any documentation metadata standard in use, with actual decision-makers recorded in extensions? Does the title follow the
     "ADR-NNNN: [Present-tense verb] [specific decision]" format?
 
 ## Output Format
