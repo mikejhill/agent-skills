@@ -306,7 +306,8 @@ def _():
     log.write_text("\n".join([msg("Checking the diff"), tool, done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
     assert not out.exists(), out.read_text()
-    log.write_text("\n".join([msg("progress"), msg("a\u2028b\r\nc"), done]) + "\n", encoding="utf-8")
+    todo = json.dumps({"type": "item.completed", "item": {"type": "todo_list", "items": []}})
+    log.write_text("\n".join([msg("progress"), tool, msg("a\u2028b\r\nc"), todo, done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
     assert out.read_bytes() == "a\u2028b\r\nc".encode("utf-8"), out.read_bytes()
 

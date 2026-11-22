@@ -779,6 +779,8 @@ def collect_output(cli_out: Path, out_path: Path, scratch):
     err = None
     staging = out_path.with_name(out_path.name + ".partial")
     try:
+        if cli_out.is_symlink():  # Codex writes a plain file; never follow a planted link
+            raise OSError(f"{cli_out} is a link, not the file Codex wrote")
         if cli_out.is_file():
             shutil.copyfile(cli_out, staging)
             os.replace(staging, out_path)
@@ -816,7 +818,7 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                     item = ev.get("item") or {}
                     if typ == "item.completed" and item.get("type") == "agent_message":
                         last_message = item.get("text") or ""
-                    elif item.get("type") not in ("agent_message", "reasoning"):
+                    elif item.get("type") not in ("agent_message", "reasoning", "todo_list", "error"):
                         last_message = None  # later work: an earlier message was progress
                 elif typ == "turn.completed":
                     final_message, last_message = last_message, None
