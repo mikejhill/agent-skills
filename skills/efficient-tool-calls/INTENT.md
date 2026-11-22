@@ -33,3 +33,7 @@ PowerShell call on one Windows machine) dominated, not the commands themselves.
   to WSL); SIGTERM/SIGHUP unwind through the sample cleanup; atomic cache write; `either` names
   the faster shell so near-threshold re-runs change strength, not direction; output-bounding
   rule warns that a pipe hides the producer's status; cache tests use stand-in shells.
+- 2026-11-22: [agent] Seventh Astra review: login/profile timing is opt-in (`--profiles`), since it
+  runs startup scripts repeatedly; the current subtree stays excluded in a home-rooted repo;
+  signals during sample setup are deferred until cleanup is armed; Windows manual fallback names
+  Git Bash; smoke test fails when shells exist but every launch fails.

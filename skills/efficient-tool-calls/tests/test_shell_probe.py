@@ -239,6 +239,52 @@ class Launch(unittest.TestCase):
                 os.chdir(old)
                 os.environ["PATH"] = oldpath
 
+    def test_current_subtree_skipped_in_home_rooted_repo(self):
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, ".git"))  # e.g. a dotfiles repository at ~
+            work = os.path.join(home, "proj")
+            sub = os.path.join(work, ".venv", "bin")
+            user = os.path.join(home, ".local", "bin")
+            os.makedirs(sub)
+            os.makedirs(user)
+            ext = ".exe" if os.name == "nt" else ""
+            for d, n in ((sub, "fakeshell-xyz"), (user, "usershell-xyz")):
+                with open(os.path.join(d, n + ext), "w") as f:
+                    f.write("#!/bin/sh\n")
+                os.chmod(os.path.join(d, n + ext), 0o755)
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            oldhome = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+            os.chdir(work)
+            os.environ["PATH"] = os.pathsep.join([sub, user, oldpath])
+            os.environ["HOME"] = os.environ["USERPROFILE"] = home
+            try:
+                self.assertIsNone(sp.find_exe("fakeshell-xyz"))  # the project's env
+                self.assertIsNotNone(sp.find_exe("usershell-xyz"))  # user installs still count
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+                for k, v in oldhome.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+
+    def test_signal_during_sample_setup_is_deferred(self):
+        sp._DEFER.update(on=True, pending=None)
+        try:
+            sp._exit_on_signal(15, None)  # arrives before the sample can be cleaned up: recorded only
+            self.assertEqual(sp._DEFER["pending"], 15)
+            with self.assertRaises(SystemExit):
+                sp._raise_pending()
+        finally:
+            sp._DEFER.update(on=False, pending=None)
+        with self.assertRaises(SystemExit):
+            sp._exit_on_signal(15, None)
+
+    def test_profiles_are_opt_in(self):
+        names = [n for n, _f, _a in sp.candidates()]
+        self.assertFalse([n for n in names if "(" in n], names)
+
     @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
     def test_link_into_workspace_is_skipped(self):
         with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as out:
@@ -270,7 +316,7 @@ class Cache(unittest.TestCase):
         self.addCleanup(td.cleanup)
         self.tmp = td.name
         self.cache = os.path.join(self.tmp, "sub", "probe.json")
-        for sig in ("SIGTERM", "SIGHUP"):  # main() installs handlers; put the test runner's back
+        for sig in ("SIGINT", "SIGTERM", "SIGHUP"):  # main() installs handlers; put the test runner's back
             if hasattr(signal, sig):
                 self.addCleanup(signal.signal, getattr(signal, sig), signal.getsignal(getattr(signal, sig)))
         old_env = os.environ.get("EFFICIENT_TOOL_CALLS_CACHE")
@@ -280,7 +326,7 @@ class Cache(unittest.TestCase):
         orig_c, orig_t = sp.candidates, sp.time_one
         self.addCleanup(setattr, sp, "candidates", orig_c)
         self.addCleanup(setattr, sp, "time_one", orig_t)
-        sp.candidates = lambda: [("bash", "posix", ["/fake/bash", "-c", "true"]),
+        sp.candidates = lambda *a: [("bash", "posix", ["/fake/bash", "-c", "true"]),
                                  ("pwsh", "powershell", ["/fake/pwsh", "-Command", "exit"])]
         sp.time_one = lambda argv, runs: {"median_ms": 80 if "bash" in argv[0] else 300, "p90_ms": 400}
 
@@ -387,15 +433,15 @@ class Cache(unittest.TestCase):
                   "shells": {"bash": {"median_ms": 80, "p90_ms": 90, "family": "posix", "path": "/b"}},
                   "inventory": {"bash": "/b", "pwsh": "/old/pwsh"}}
         try:
-            sp.inventory = lambda: {"bash": "/b", "pwsh": "/old/pwsh"}
+            sp.inventory = lambda *a: {"bash": "/b", "pwsh": "/old/pwsh"}
             self.assertIsNotNone(sp.valid_cache(json.loads(json.dumps(cached)), 5))
-            sp.inventory = lambda: {"bash": "/b", "pwsh": "/new/pwsh"}  # a working install now first on PATH
+            sp.inventory = lambda *a: {"bash": "/b", "pwsh": "/new/pwsh"}  # a working install now first on PATH
             self.assertIsNone(sp.valid_cache(json.loads(json.dumps(cached)), 5))
         finally:
             sp.inventory = orig
 
     def test_pwsh_failure_falls_back_to_51(self):
-        sp.candidates = lambda: [("bash", "posix", ["b"]), ("pwsh", "powershell", ["p"]),
+        sp.candidates = lambda *a: [("bash", "posix", ["b"]), ("pwsh", "powershell", ["p"]),
                                  ("powershell", "powershell-5", ["w"])]
         sp.time_one = lambda argv, runs: None if argv == ["p"] else {"median_ms": 100 if argv == ["b"] else 400,
                                                                        "p90_ms": 1}
@@ -418,7 +464,9 @@ class RealShells(unittest.TestCase):
                 self.assertEqual(p.returncode, 0, p.stderr)
                 outs.append(json.loads(p.stdout))
             if not outs[0]["shells"]:
-                self.skipTest("no shell measured on this machine")
+                self.assertFalse(outs[0].get("inventory"), "shells found but every launch failed: %s"
+                                 % outs[0].get("failed"))
+                self.skipTest("no shell on this machine")
             for v in outs[0]["shells"].values():
                 self.assertGreaterEqual(v["median_ms"], 0)
             self.assertTrue(outs[1]["cached"])

@@ -26,8 +26,9 @@ minutes. Spend fewer, better calls.
    In a chain, a pipe reports the filter's status, not the command's: `build | head &&
    next` runs `next` after a failed build, and `head` can cut a producer short. For steps
    whose success matters, use the tool's own limit flag, or save the output and filter it
-   afterwards (`build > out.log 2>&1; s=$?; tail -n 40 out.log; test $s -eq 0 && next`;
-   in bash, `set -o pipefail` also works).
+   afterwards (`build > out.log 2>&1; s=$?; tail -n 40 out.log; test $s -eq 0 && next`).
+   `set -o pipefail` fixes the status but not the early stop; use it only with filters
+   that read the whole stream.
 4. **Don't discard output you need.** Many tools report timeouts, warnings, and partial
    failures on stdout; `>/dev/null`, `| Out-Null`, or merging stderr into a discarded
    stream hides them. Filter instead. Discarding stdout that only ever holds noise is
@@ -76,8 +77,8 @@ python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else pyt
 - It runs the shells it finds on PATH. It skips PATH entries inside the current
   repository (or the current directory outside one), but that is best effort: run it from
   a directory you trust, not from an untrusted checkout with an activated environment.
-- `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more, and
-  `login_cost_ms` when a login shell does. They matter only if your harness loads the
+- With `--profiles`, `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms
+  or more, and `login_cost_ms` when a login shell does. They matter only if your harness loads the
   profile for each call.
 
 Then:
@@ -86,10 +87,10 @@ Then:
 |---|---|
 | Only one shell tool | Use it; nothing to choose |
 | `recommendation` says `either` (under 150 ms apart; it still names the faster shell) | Pick by task; don't switch for speed |
-| Your harness starts shells another way (login bash, PowerShell with profile) | Compare the matching entries (`bash (login)`, `pwsh (profile)`) instead of the bare ones, with the same 150 ms threshold |
+| Your harness starts shells another way (login bash, PowerShell with profile) | Re-run with `--profiles` and compare the matching entries (`bash (login)`, `pwsh (profile)`), with the same 150 ms threshold. It runs your startup scripts several times, including anything they start |
 | One shell is faster by 150 ms or more | Use it for general command-line work: `git`, `python`, build and test tools, file reads |
 | Work only one shell does well | Use that shell regardless: cmdlets, the registry, .NET and CIM objects in PowerShell; pipes through `grep`/`sed`/`awk` in a POSIX shell |
-| Python is not available | Time one empty call per shell by hand (`time bash -c true`; `Measure-Command { pwsh -NoProfile -c exit }`) and apply the same rule |
+| Python is not available | Time one empty call per shell by hand and apply the same rule. POSIX: `time bash -c true`. Windows (bare `bash` may be the WSL launcher, so name Git Bash): `Measure-Command { & "$env:ProgramFiles\Git\bin\bash.exe" -c true }` and `Measure-Command { pwsh -NoProfile -c exit }` |
 
 The probe measures bare shell startup. A harness adds its own time per call, and it can
 differ per shell (one launches PowerShell through an extra `cmd.exe` hop, ~85 ms; another

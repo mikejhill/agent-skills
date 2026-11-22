@@ -10,6 +10,8 @@ shell saves that difference on every call. Measure once per machine; reuse the r
     python shell_probe.py --force         measure now
     python shell_probe.py --max-age-days N
     python shell_probe.py --runs N        timed runs per shell (default 5, plus 1 warm-up)
+    python shell_probe.py --profiles      also time login bash/zsh and PowerShell with profile
+                                          (runs your startup scripts runs+1 times each)
 
 Prints one JSON object: per-shell median/p90 startup in ms, the fastest POSIX shell, the
 fastest PowerShell, and a recommendation. Stdlib only, Python 3.8+. Cache:
@@ -84,10 +86,15 @@ def find_exe(name, skip=None, exact=False):
     root = workspace_root()
     # If the workspace is home or a drive root (a dotfiles repo, or run from ~), "under it"
     # would cover user installs such as ~/.local/bin: only skip the directory itself.
-    broad = _under(_norm(os.path.expanduser("~")), root)
+    home = _norm(os.path.expanduser("~"))
+    broad = _under(home, root)
+    cwd = _norm(os.getcwd())
+    cwd_tree = not _under(home, cwd)  # below home: the current subtree is still the workspace
 
     def inside(p):
-        return p == root if broad else _under(p, root)
+        if not broad:
+            return _under(p, root)
+        return p == root or (cwd_tree and _under(p, cwd))
     for d in os.environ.get("PATH", "").split(os.pathsep):
         d = d.strip('"')
         if not d or not os.path.isabs(d) or inside(_norm(d)):
@@ -131,14 +138,16 @@ def win_bash():
     return None
 
 
-def candidates():
-    """(name, family, argv) for each shell found. argv runs an empty command."""
+def candidates(profiles=False):
+    """(name, family, argv) for each shell found. argv runs an empty command. `profiles` adds
+    login/profile launch modes, which run the user's startup scripts (and anything they start)."""
     out = []
     posix = [("bash", win_bash())] if IS_WIN else [(n, find_exe(n)) for n in ("bash", "zsh")]
     for name, p in posix:  # what agent shell tools run (not sh)
         if p:
             out.append((name, "posix", [p, "-c", "true"]))
-            out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
+            if profiles:
+                out.append((name + " (login)", "posix-login", [p, "-lc", "true"]))
     # Windows PowerShell 5.1 only stands in when pwsh 7 is missing: agent tools run pwsh, and
     # 5.1 lacks `&&`, ternaries and UTF-8 defaults, so a faster 5.1 start is no reason to use it.
     pw = find_exe("pwsh")
@@ -147,7 +156,8 @@ def candidates():
         if p:
             fam = "powershell" if name == "pwsh" or not pw else "powershell-5"
             out.append((name, fam, [p, "-NoProfile", "-NonInteractive", "-Command", "exit"]))
-            out.append((name + " (profile)", fam + "-profile", [p, "-NonInteractive", "-Command", "exit"]))
+            if profiles:
+                out.append((name + " (profile)", fam + "-profile", [p, "-NonInteractive", "-Command", "exit"]))
     if IS_WIN:
         p = find_exe("cmd")
         if p:
@@ -172,6 +182,23 @@ def system_dir():
     return buf.value
 
 
+_DEFER = {"on": False, "pending": None}  # signals that arrive while a sample is being set up
+
+
+def _exit_on_signal(signum, _frame):
+    if _DEFER["on"]:  # no handle on the sample yet: act once its cleanup is in place
+        _DEFER["pending"] = signum
+        return
+    raise SystemExit(128 + signum)
+
+
+def _raise_pending():
+    _DEFER["on"] = False
+    s, _DEFER["pending"] = _DEFER["pending"], None
+    if s:
+        raise SystemExit(128 + s)
+
+
 def run_once(argv, kw, limit=30):
     """Seconds until the shell exits, or None if it fails. Waits on the process itself
     (no timeout polling, which adds up to 50 ms on POSIX); a timer enforces `limit`."""
@@ -180,10 +207,12 @@ def run_once(argv, kw, limit=30):
         kw["creationflags"] = kw.get("creationflags", 0) | 0x00000200  # CREATE_NEW_PROCESS_GROUP
     else:
         kw["start_new_session"] = True  # own process group, so a timeout ends its children too
+    _DEFER["on"] = True  # until the timer and the cleanup handler are in place
     try:
         t = time.perf_counter()
         p = subprocess.Popen(argv, **kw)
     except OSError:
+        _raise_pending()
         return None
 
     def kill_tree():
@@ -205,6 +234,7 @@ def run_once(argv, kw, limit=30):
     killer = threading.Timer(limit, kill_tree)
     killer.start()
     try:
+        _raise_pending()
         code = p.wait()
         dt = time.perf_counter() - t
     except BaseException:  # Ctrl+C: don't leave the sample's process group behind
@@ -275,9 +305,9 @@ def recommend(shells):
     return r
 
 
-def measure(runs):
+def measure(runs, profiles=False):
     shells, failed, inv = {}, [], {}
-    for name, fam, argv in candidates():
+    for name, fam, argv in candidates(profiles):
         inv[name] = argv[0]  # every candidate's executable, measured or failed
         t = time_one(argv, runs)
         if t:
@@ -296,12 +326,12 @@ def measure(runs):
     return res
 
 
-def inventory():
+def inventory(profiles=False):
     """Shell name -> executable for the shells this process would measure (no timing)."""
-    return {name: argv[0] for name, _fam, argv in candidates()}
+    return {name: argv[0] for name, _fam, argv in candidates(profiles)}
 
 
-def valid_cache(c, runs):
+def valid_cache(c, runs, profiles=False):
     """A fresh, well-formed record for this host and platform, with derived fields recomputed."""
     if not (isinstance(c, dict) and c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname()
             and c.get("platform") == sys.platform and isinstance(c.get("measured_at"), (int, float))):
@@ -321,7 +351,7 @@ def valid_cache(c, runs):
     inv = c.get("inventory")
     if not isinstance(inv, dict) or set(inv) != set(shells) | set(failed):
         return None
-    if inv != inventory() or any(inv[k] != v.get("path") for k, v in shells.items()):
+    if inv != inventory(profiles) or any(inv[k] != v.get("path") for k, v in shells.items()):
         return None  # another PATH or install (failed shells included): re-measure
     for k in ("fastest_posix", "fastest_powershell", "recommendation", "profile_cost_ms", "login_cost_ms"):
         c.pop(k, None)
@@ -329,21 +359,20 @@ def valid_cache(c, runs):
     return c
 
 
-def _exit_on_signal(signum, _frame):
-    raise SystemExit(128 + signum)
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--force", action="store_true", help="measure even if a fresh cached result exists")
     ap.add_argument("--max-age-days", type=float, default=7, help="reuse a cached result up to this old (7)")
     ap.add_argument("--runs", type=int, default=5, help="timed runs per shell (5)")
+    ap.add_argument("--profiles", action="store_true",
+                    help="also time login shells and PowerShell with profile; runs your startup "
+                         "scripts runs+1 times each, including anything they start")
     a = ap.parse_args(argv)
     if threading.current_thread() is threading.main_thread():
         # A harness that cancels with SIGTERM/SIGHUP would otherwise end Python without
         # unwinding, leaving the sample (in its own session) running: exit through run_once's
         # cleanup instead.
-        for sig in ("SIGTERM", "SIGHUP"):
+        for sig in ("SIGINT", "SIGTERM", "SIGHUP"):
             if hasattr(signal, sig):
                 try:
                     signal.signal(getattr(signal, sig), _exit_on_signal)
@@ -354,14 +383,14 @@ def main(argv=None):
         try:
             with open(path, encoding="utf-8") as f:
                 c = json.load(f)
-            c = valid_cache(c, max(1, a.runs))
+            c = valid_cache(c, max(1, a.runs), a.profiles)
             if c and time.time() - c["measured_at"] < a.max_age_days * 86400:
                 c["cached"] = True
                 print(json.dumps(c))
                 return 0
         except (OSError, ValueError):
             pass
-    res = measure(max(1, a.runs))
+    res = measure(max(1, a.runs), a.profiles)
     try:
         if not res["shells"]:  # a run that found nothing (restricted PATH, blocked launches) isn't cached
             raise OSError("no shell measured")
