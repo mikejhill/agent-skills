@@ -12,6 +12,11 @@
         "skills/**/*.md"
     ],
 
+    // Skill assets are templates with <placeholders>, not documentation.
+    "ignores": [
+        "skills/**/assets/**"
+    ],
+
     // Rule configuration for markdownlint.
     "config": {
         // Start from all built-in markdownlint rules enabled.

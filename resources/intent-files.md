@@ -21,7 +21,7 @@ Intent files are for:
 
 - **Human operators** reviewing or updating their features.
 - **Agents creating or maintaining features** (e.g., via the
-  `writing-ai-instructions` skill or refinement workflows).
+  `skill-development` skill or refinement workflows).
 
 Intent files are NOT for agents consuming the feature. An agent using the
 python-development skill does not need the python-development intent file.
@@ -57,6 +57,10 @@ One-line statement of what this feature does and why it exists.
 2. Second priority goal
 3. Additional goals as needed
 
+## Requirements
+
+- Constraint or specific the operator asked for, in their words
+
 ## Log
 
 - YYYY-MM-DD: Description of a decision, change, or observation
@@ -82,6 +86,14 @@ development, higher-ranked goals win. Goals MUST be:
 Aim for 3–7 goals. Fewer than 3 suggests under-specification. More than 7
 suggests the feature's scope is too broad or goals are too granular.
 
+#### Requirements
+
+Bulleted constraints and specifics the operator asked for: required
+behavior, exclusions, environments, and conventions. Keep the operator's
+wording wherever possible. Together with the purpose line and goals, this
+section must make it possible to rebuild the feature from the intent file
+alone. Agent inferences belong in `[agent]` log entries, not here.
+
 #### Log
 
 Append-only chronological record. Each entry is a single line with a date
@@ -101,7 +113,7 @@ or remove.
 ### Creating a feature from an intent file
 
 1. Read the intent file.
-2. Treat goals as binding requirements ordered by priority.
+2. Treat goals and requirements as binding; goals are ordered by priority.
 3. Treat log entries as context — they inform implementation but do not
    override goals.
 4. Create the feature. Do NOT modify the intent file during initial creation.
@@ -112,8 +124,8 @@ or remove.
 2. Make the requested changes to the feature.
 3. Append a log entry summarizing what changed and why. Use the `[agent]`
    prefix.
-4. Do NOT modify existing goals or log entries unless the operator explicitly
-   asks.
+4. Do NOT modify existing goals, requirements, or log entries unless the
+   operator explicitly asks.
 
 ### Updating goals
 

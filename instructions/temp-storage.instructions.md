@@ -20,11 +20,12 @@ preservation, rollback, debugging, and inter-agent coordination.
   info/          # Inferred/cached information
 ```
 
-**Naming**: `.tmp/{dir}/{session-id}-{description}.{ext}`
-where session-id is 8 random alphanumeric chars.
+Skills put their workspace scratch in `.tmp/<skill-name>/`. Output meant for the user with no project home, such as a handoff, follows that skill's own destination.
 
-Alternatives: timestamp (`YYYYMMDD-HHMMSS-desc.ext`), stage-based
-(`01-step.ext`), or plain (`desc.ext`) for cross-session files.
+**Naming**: `{kind}-{YYYYMMDD-HHMMSS}-{description}.{ext}` in local time,
+for example `report-20261122-175433-auth-flow.md`. Never overwrite; on a
+clash append `-2`, `-3`, and so on. Use plain names (`desc.ext`) only for
+files meant to persist across sessions.
 
 ## Rules
 

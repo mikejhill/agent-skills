@@ -317,7 +317,7 @@ the harsh critic and advocate. Skip researcher-dependent steps in Phase 3
 (steps 2 and 5) and treat the researcher novelty rate as 0% in Phase 4.
 
 When constructing sub-agent prompts, follow these prompt construction
-conventions (derived from the `writing-ai-instructions` skill):
+conventions:
 
 - Use imperative voice ("Evaluate X" not "You should evaluate X").
 - Ban vague language ("improve", "better", "appropriate") — replace with
