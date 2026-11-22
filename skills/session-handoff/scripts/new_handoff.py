@@ -15,45 +15,91 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
 IS_WINDOWS = os.name == "nt"
 
 
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _is_link_or_junction(path: Path) -> bool:
+    """True for symlinks and, on Windows, any reparse point (junctions included)."""
+    info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    return bool(getattr(info, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def _usable_dir(value: str | None) -> Path | None:
-    """Return the directory if it exists, is a directory, and is writable."""
+    """Return the directory if it is absolute, exists, and is writable."""
     if not value:
         return None
-    path = Path(value).expanduser()
+    path = Path(value)
     if not path.is_absolute() or not path.is_dir():
         return None
     if not os.access(path, os.W_OK | os.X_OK):
         return None
-    return path.resolve()
+    path = path.resolve()
+    if IS_WINDOWS and not _inside_user_profile(path):
+        return None
+    return path
+
+
+def _inside_user_profile(path: Path) -> bool:
+    """Windows: accept only temp roots inside the user's own profile."""
+    profile = os.environ.get("USERPROFILE")
+    if not profile:
+        return False
+    try:
+        path.relative_to(Path(profile).resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def resolve_temp_dir() -> Path:
     """Pick the first verified temp directory. Never fall back to the cwd."""
-    candidates = [os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")]
+    names = ("TEMP", "TMP", "TMPDIR") if IS_WINDOWS else ("TMPDIR", "TEMP", "TMP")
+    candidates = [os.environ.get(name) for name in names]
     if not IS_WINDOWS:
         candidates += ["/tmp", "/var/tmp"]
     for candidate in candidates:
         found = _usable_dir(candidate)
         if found is not None:
             return found
-    raise SystemExit("error: no existing, writable temp directory found (checked TMPDIR, TEMP, TMP"
-                     + ("" if IS_WINDOWS else ", /tmp, /var/tmp") + ")")
+    where = "inside %USERPROFILE%" if IS_WINDOWS else "(also checked /tmp, /var/tmp)"
+    raise SystemExit(f"error: no absolute, existing, writable temp directory in {', '.join(names)} {where}")
+
+
+def _restrict_windows_acl(directory: Path) -> None:
+    """Remove inherited ACEs and grant full control to the current user only."""
+    user = os.environ.get("USERNAME")
+    domain = os.environ.get("USERDOMAIN")
+    if not user:
+        raise SystemExit("error: USERNAME is not set; cannot restrict the handoff directory")
+    principal = f"{domain}\\{user}" if domain else user
+    result = subprocess.run(
+        ["icacls", str(directory), "/inheritance:r", "/grant:r", f"{principal}:(OI)(CI)F"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"error: could not restrict {directory} to {principal}: "
+                         f"{(result.stderr or result.stdout).strip()}")
 
 
 def private_handoff_dir(temp: Path) -> Path:
     """Create or verify a per-user handoff directory only the user can access."""
     if IS_WINDOWS:
-        # %TEMP% is already inside the user's profile and ACL'd to that user.
         directory = temp / "agent-handoffs"
         directory.mkdir(exist_ok=True)
-        if directory.is_symlink() or not directory.is_dir():
-            raise SystemExit(f"error: {directory} is not a plain directory")
+        if _is_link_or_junction(directory) or not directory.is_dir():
+            raise SystemExit(f"error: {directory} is a link, junction, or not a directory")
+        _restrict_windows_acl(directory)
         return directory
 
     uid = os.getuid()
@@ -82,7 +128,7 @@ def reserve_file(directory: Path, slug: str) -> Path:
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base = f"handoff-{stamp}-{slug}"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    for attempt in range(1, 1000):
+    for attempt in range(1, 100):
         name = f"{base}.md" if attempt == 1 else f"{base}-{attempt}.md"
         path = directory / name
         try:

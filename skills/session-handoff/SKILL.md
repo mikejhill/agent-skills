@@ -49,17 +49,17 @@ Treat the focus as the user's priority for the next session, not as a replacemen
 
 ### Reserve the file
 
-Run the bundled script with 2 to 5 words naming the goal (or the focus, when given):
+Run the bundled script, resolving its path from the directory that contains this `SKILL.md` (not from the working directory), with 2 to 5 words naming the goal (or the focus, when given):
 
 ```bash
-python3 scripts/new_handoff.py fix safari export   # use "python" or "py" where "python3" is absent
+python3 "<skill-dir>/scripts/new_handoff.py" fix safari export   # use "python" or "py" where "python3" is absent
 ```
 
 It prints `{"path": "...", "uri": "file:///..."}` and guarantees:
 
-- **Verified temp directory.** Checks `TMPDIR`, `TEMP`, `TMP`, then (Unix) `/tmp` and `/var/tmp`, and takes the first that exists and is writable. Never falls back to the working directory; exits non-zero instead.
-- **Private directory.** Windows: `%TEMP%\agent-handoffs\` (already per-user). Unix: `<temp>/agent-handoffs-<uid>/`, created mode `0700`; refuses a directory that is a symlink or owned by another user.
-- **No overwrites.** Creates `handoff-<YYYYMMDD-HHMMSS>-<slug>.md` exclusively, mode `0600`; on a clash it tries `-2`, `-3`, and so on.
+- **Verified temp directory.** Takes the first candidate that is absolute, exists, and is writable: Windows `TEMP`, `TMP`, `TMPDIR`, accepted only inside `%USERPROFILE%`; Unix `TMPDIR`, `TEMP`, `TMP`, `/tmp`, `/var/tmp`. Never falls back to the working directory; exits non-zero instead.
+- **Private directory.** Windows: `<temp>\agent-handoffs\`, with inherited permissions removed and full control granted to the current user only (`icacls`); fails if that cannot be set. Unix: `<temp>/agent-handoffs-<uid>/`, mode `0700`, owned by the user. Rejects symlinks and junctions.
+- **No overwrites.** Creates `handoff-<YYYYMMDD-HHMMSS>-<slug>.md` exclusively, mode `0600`; on a name clash only, it tries `-2`, `-3`, and so on, up to 99.
 
 Write the document into the reserved file. Never write to any other path.
 
@@ -69,9 +69,11 @@ If the script exits non-zero, report its error to the user and stop. Do not pick
 
 Do the same steps by hand, keeping every guarantee:
 
-1. Take the first of `TMPDIR`, `TEMP`, `TMP`, `/tmp` that is an existing, writable directory. If none is, stop and report.
-2. Unix: `umask 077; mkdir -p "<temp>/agent-handoffs-$(id -u)"`, then confirm it is a plain directory you own with mode `700` (`ls -ld`). Windows: create `%TEMP%\agent-handoffs`.
-3. Create the file exclusively: POSIX `set -C` before redirecting (`: > "$file"`), PowerShell `New-Item -ItemType File -Path $file` (fails if it exists). On failure, try the next suffix.
+1. Pick the temp root from the candidate list above, in that order. Accept only an absolute path to an existing, writable directory (on Windows, inside `%USERPROFILE%`). If none qualifies, stop and report.
+2. Create the handoff directory inside that root, and only there:
+   - Unix: `umask 077; mkdir -p "$root/agent-handoffs-$(id -u)"`; confirm with `ls -ld` that it is a plain directory (not a symlink), owned by you, mode `drwx------`.
+   - Windows: `New-Item -ItemType Directory -Force "$root\agent-handoffs"`; confirm `(Get-Item $dir).LinkType` is empty; then `icacls $dir /inheritance:r /grant:r "${env:USERDOMAIN}\${env:USERNAME}:(OI)(CI)F"`. Stop if any step fails.
+3. Create the file exclusively: POSIX `set -C; : > "$file"`, PowerShell `New-Item -ItemType File -Path $file`. If creation fails because the name exists, try the next suffix, up to 99. On any other error (disk full, quota, permission), stop and report it.
 
 ### Link
 
