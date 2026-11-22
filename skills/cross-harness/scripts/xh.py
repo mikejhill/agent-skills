@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
@@ -767,8 +768,13 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
 
 
 def scratch_root() -> Path:
-    """The only place scratch dirs live; sweep reclaims leftovers by scanning it."""
-    return Path(tempfile.gettempdir()) / "cross-harness-out"
+    """The only place scratch dirs live; sweep reclaims leftovers by scanning it.
+
+    Namespaced by state home, so a sweep under one CROSS_HARNESS_HOME never
+    touches the scratch dirs of jobs that belong to another.
+    """
+    key = hashlib.sha256(str(jobs_dir().resolve()).lower().encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / "cross-harness-out" / key
 
 
 SCRATCH_NAME = re.compile(r"^(xh-\d{8}-\d{6}-[0-9a-f]{4})-(result|fix)-[A-Za-z0-9_]+$")
@@ -781,10 +787,9 @@ def reclaim_scratch() -> None:
     directly in scratch_root() whose names match SCRATCH_NAME are touched, and none
     younger than a minute, so a starting or just-finished supervisor keeps its own.
     """
-    root = scratch_root()
     try:
-        entries = list(root.iterdir())
-    except OSError:
+        entries = list(scratch_root().iterdir())
+    except OSError:  # includes no usable temp dir at all
         return
     for d in entries:
         m = SCRATCH_NAME.match(d.name)
@@ -863,7 +868,7 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
         if final_message and not errors and not (out_path.is_file() and out_path.stat().st_size > 0):
             staging = out_path.with_name(out_path.name + ".partial")
             try:
-                staging.write_text(final_message, encoding="utf-8")
+                staging.write_bytes(final_message.encode("utf-8"))  # no newline translation
                 os.replace(staging, out_path)
             except OSError as e:
                 errors.append(f"could not write the recovered final message: {e}")

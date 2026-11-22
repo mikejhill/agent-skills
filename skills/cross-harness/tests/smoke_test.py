@@ -302,9 +302,9 @@ def _():
     log.write_text("\n".join([msg("progress"), msg(""), done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
     assert not out.exists(), out.read_text()
-    log.write_text("\n".join([msg("progress"), msg("a\u2028b"), done]) + "\n", encoding="utf-8")
+    log.write_text("\n".join([msg("progress"), msg("a\u2028b\r\nc"), done]) + "\n", encoding="utf-8")
     xh.parse_outputs("codex", log, out)
-    assert out.read_text(encoding="utf-8") == "a\u2028b", out.read_text(encoding="utf-8")
+    assert out.read_bytes() == "a\u2028b\r\nc".encode("utf-8"), out.read_bytes()
 
 
 @case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
@@ -344,8 +344,11 @@ def _():
 def _():
     jid = start("task", "-t", "codex", "hello")
     run("wait", jid, "--timeout", "30", check=0)
-    root = TMP / "t" / "cross-harness-out"
-    root.mkdir(exist_ok=True)
+    root = TMP / "t" / "cross-harness-out" / xh.hashlib.sha256(
+        str((TMP / "home" / "jobs").resolve()).lower().encode("utf-8")).hexdigest()[:12]
+    root.mkdir(parents=True, exist_ok=True)
+    foreign = root.parent / "otherhome1234" / "xh-20000101-000000-beef-result-z9"
+    foreign.mkdir(parents=True)
     done = root / f"{jid}-result-abc123"
     gone_job = root / "xh-20000101-000000-dead-fix-q_1"
     fresh = root / f"{jid}-fix-new1"
@@ -354,11 +357,12 @@ def _():
         d.mkdir()
         (d / "f").write_text("x")
     old = time.time() - 3600
-    for d in (done, gone_job, other):
+    for d in (done, gone_job, other, foreign):
         os.utime(d, (old, old))
     run("status", check=0)
     assert not done.exists() and not gone_job.exists(), "stale dirs kept"
     assert fresh.exists() and other.exists(), "fresh or unrelated dir removed"
+    assert foreign.exists(), "another state home's scratch dir removed"
 
 
 @case("no job holds the repo after completion")
