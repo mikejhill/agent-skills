@@ -40,7 +40,7 @@ checkout of that ref, preferably a worktree of the user's existing clone. On eve
 confirm the checkout's `HEAD` equals the fetched ref before starting the job; if it is
 behind and clean, move it to the ref, and if it has local edits, stop and report.
 
-With no local clone, put the clone wherever the user's scratch or temp-storage rules say.
+With no local clone, put the clone wherever the user's scratch or temporary-file rules say.
 If they have none, ask the user where to clone rather than picking a location.
 
 When the review loop ends, also when it fails, remove only a clone or worktree you
