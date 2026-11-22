@@ -33,11 +33,14 @@ and 2.1.327.
 | A different repository | `--cwd PATH` |
 
 For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current. With no local clone, clone into a disposable scratch directory outside any workspace
-(`<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`, or wherever the user's instructions put scratch work), reuse it
-for later review rounds, and remove it when the review loop ends, also when it fails.
-After a `--fix` run, move the fixes to the intended checkout (or keep the clone and
-report its path) before removing it.
+current. With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`,
+where `<scratch-root>` is the user's scratch location if their instructions define one, else
+`%TEMP%\agent-skills\scratch\` on Windows or `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/`
+elsewhere (parent owned by you, mode `0700`, not a symlink). Reuse the clone for later review
+rounds. When the review loop ends, also when it fails, remove it only after confirming it
+holds no unique work: no working-tree edits, untracked files, stashes, or unpushed commits.
+After a `--fix` run, move the fixes to the intended checkout first. If any check finds
+unique work or cannot run, keep the clone and report its path.
 
 ## Fixing: `--fix`
 

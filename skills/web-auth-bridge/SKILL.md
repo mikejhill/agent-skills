@@ -38,7 +38,7 @@ For a checkout under development: `uv add --editable <path>`. Playwright needs a
 - Do not use this library for sites with plain API-key auth.
 - `StealthConfig`, `launch_kwargs` (for example a proxy), an active-check `is_authenticated`, and `force_authenticate()` for debugging are available when needed.
 
-Wrap it in a CLI that reads credentials itself and returns only results. The agent never reads, writes, or quotes credential files.
+Wrap it in a CLI that reads credentials itself and returns only results. The agent never reads, writes, or quotes credential files. Credential files are owner-only: mode `600` on Unix, an ACL limited to the current user on Windows.
 
 ## References
 
