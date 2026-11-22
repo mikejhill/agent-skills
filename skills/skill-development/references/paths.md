@@ -12,7 +12,7 @@
 Choose by lifetime and audience:
 
 - **Workspace scratch** holds intermediate results, logs, and checkpoints for work in one project. Ensure `.tmp/` is gitignored before writing there.
-- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and not group- or world-writable. Otherwise stop.
+- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
 - **Config** honors `XDG_CONFIG_HOME` on every OS, matching `skill-cli-development`. It holds settings and credentials the user creates. Scripts read it. Agents never write credentials. See the `skill-cli-development` skill.
 - **Cache and state** holds data a script can rebuild, such as probe results, broker state, or downloads.
 
@@ -36,18 +36,22 @@ def system_temp(skill: str) -> Path:
         parent = base / f"agent-skills-{os.getuid()}"
         parent.mkdir(mode=0o700, exist_ok=True)
         st = parent.lstat()
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o022:
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
             raise SystemExit(f"unsafe temp directory: {parent}")
         return parent / skill
     raise SystemExit("no usable system temp directory")
 
+def env_root(var: str, default: Path) -> Path:
+    value = os.environ.get(var, "")
+    return Path(value) if os.path.isabs(value) else default  # ignore relative values
+
 def user_cache(skill: str) -> Path:
     if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        base = env_root("LOCALAPPDATA", Path.home() / "AppData" / "Local")
     elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Caches"
     else:
-        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        base = env_root("XDG_CACHE_HOME", Path.home() / ".cache")
     return base / "agent-skills" / skill
 ```
 
@@ -65,6 +69,6 @@ def user_cache(skill: str) -> Path:
 - Create directories on first write, not on first run.
 - Create files exclusively, with `open(path, "x")` or `New-Item`, which fails if the file exists. On a name clash, append `-2`, `-3`, and so on. Never overwrite.
 - Never write into the skill folder at run time. It may be read-only or synced, and changes there are lost or leak into every installation.
-- Never fall back to the working directory when a system location is unusable. Stop and report.
+- Never fall back to the working directory when a system location is unusable. Stop and report. Ignore relative values in `TMPDIR`, `XDG_*`, or `LOCALAPPDATA`.
 - Leave temp files in place unless the skill states when to delete them. Report the path of anything the user needs.
 - Give the user both the native path and a `file://` URI. If the agent runs remotely, say how to copy the file out.

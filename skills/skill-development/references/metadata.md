@@ -19,7 +19,7 @@ From the [Agent Skills specification](https://agentskills.io/specification):
 
 ## Invocation flags
 
-These are harness extensions, not spec fields. Harnesses that do not know a flag ignore it, so the skill stays portable.
+These are harness extensions, not spec fields. They enforce invocation where a harness supports them. Harnesses that do not know a flag ignore it, so they are not a portable guarantee.
 
 | Need | Frontmatter | Codex sidecar |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ Restrict model invocation only when a run has effects the user must choose:
 - It writes outside the workspace.
 - Its description would otherwise trigger on ordinary requests where it is wrong.
 
-A skill that only informs how work is done stays model-invocable. Never set both restrictions, because that makes the skill unreachable.
+A user-only skill must also say so in its portable text: state in the description and the body "Run only when the user explicitly invokes it". This holds in harnesses that ignore the flags. A skill that only informs how work is done stays model-invocable. Never set both restrictions, because that makes the skill unreachable.
 
 The Codex sidecar is required for user-only skills, because Codex ignores `disable-model-invocation`:
 

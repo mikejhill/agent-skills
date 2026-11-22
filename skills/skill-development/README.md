@@ -9,7 +9,7 @@ Loads automatically when an agent creates, revises, renames, or reviews a skill.
 - "Create a skill for our release process."
 - "Review skills/browser-control against the skill standards."
 
-Run the checker yourself on one skill or a folder of skills. Use the installed skill's folder, for example `~/.claude/skills/skill-development` or `~/.agents/skills/skill-development`, or `skills/skill-development` in a library checkout:
+Run the checker yourself on one skill or a folder of skills. `<skill-dir>` is the folder holding this skill's `SKILL.md`: wherever your harness installed it, or `skills/skill-development` in a library checkout.
 
 ```bash
 python3 <skill-dir>/scripts/check_skill.py path/to/my-skill      # Windows: py -3
@@ -18,7 +18,7 @@ python3 <skill-dir>/scripts/check_skill.py path/to/skills --json
 
 ## Requirements
 
-- Python 3.9+ for the checker. It uses PyYAML for full YAML validation when installed, and otherwise a strict stdlib parser. The guidance itself needs nothing.
+- Python 3.9+ for the checker (stdlib only). It accepts only a strict, unambiguous YAML subset in frontmatter. The guidance itself needs nothing.
 
 ## Results
 

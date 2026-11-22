@@ -76,6 +76,13 @@ class CheckSkillTest(unittest.TestCase):
             "description: [one, two]\n": True,
             "description: >-\n  Does X. Use when: Y.\n": False,
             'description: "Use when: Y"\n': False,
+            "description: null\n": True,
+            "description: 123\n": True,
+            "description: yes\n": True,
+            "description: D.\ndescription: E.\n": True,
+            "description: D.\nmetadata: null\n": True,
+            "description: D.\nmetadata:\n  version: 1.0\n": True,
+            "description: D.\nmetadata:\n  version: '1.0'\n": False,
         }
         for parser in (check_skill.parse_frontmatter, self.subset_only):
             for desc, bad in cases.items():
@@ -94,8 +101,18 @@ class CheckSkillTest(unittest.TestCase):
         front = "name: s\ndescription: D.\ndisable-model-invocation: true\n"
         d = make_skill(self.root, "s", front, files={"agents/openai.yaml": "# allow_implicit_invocation: false\n"})
         self.assertTrue(any(l == "error" and "openai.yaml" in m for l, m in levels(d)))
+        (d / "agents" / "openai.yaml").write_text("policy:\n  other:\n    allow_implicit_invocation: false\n", encoding="utf-8")
+        self.assertTrue(any("openai.yaml" in m for _, m in levels(d)))
         (d / "agents" / "openai.yaml").write_text("policy:\n  allow_implicit_invocation: false\n", encoding="utf-8")
         self.assertEqual(levels(d), [])
+
+    def test_link_outside_skill_and_unreadable_file(self) -> None:
+        (self.root / "shared.md").write_text("# s\n", encoding="utf-8")
+        d = make_skill(self.root, "s", "name: s\ndescription: D.\n", body="[x](../shared.md)\n")
+        (d / "INTENT.md").write_bytes(b"\xff\xfe\x00bad")
+        msgs = [m for l, m in levels(d) if l == "error"]
+        self.assertTrue(any("leaves the skill folder" in m for m in msgs))
+        self.assertTrue(any("cannot read INTENT.md" in m for m in msgs))
 
     def test_nested_fences(self) -> None:
         body = "````markdown\n```bash\nx\n```\n[ex](references/none.md)\n````\n"

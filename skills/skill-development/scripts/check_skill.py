@@ -70,6 +70,12 @@ def _plain_scalar(raw: str) -> tuple[object, str | None]:
         return None, "contains ': ' (quote it or use a '>-' block)"
     if value in ("true", "false"):
         return value == "true", None
+    if value in ("", "~", "null", "Null", "NULL"):
+        return None, None
+    if re.fullmatch(r"[-+]?(\d[\d_]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?|0x[0-9a-fA-F]+|0o[0-7]+|[-+]?\.(inf|Inf)|\.(nan|NaN)", value):
+        return 0, None  # a number, never a string
+    if value in ("yes", "no", "on", "off", "Yes", "No", "On", "Off", "True", "False", "TRUE", "FALSE"):
+        return None, f"is the ambiguous YAML word '{value}'; quote it or use true/false"
     return value, None
 
 
@@ -83,7 +89,7 @@ def parse_frontmatter_subset(src: str) -> tuple[dict[str, object], str | None]:
         i += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        m = re.match(r"^([A-Za-z0-9_-]+):(?:\s+(.*))?$", line)
+        m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):(?:\s+(.*))?$", line)
         if not m:
             return fields, f"cannot parse frontmatter line: {line!r}"
         key, raw = m.group(1), (m.group(2) or "").strip()
@@ -108,68 +114,64 @@ def parse_frontmatter_subset(src: str) -> tuple[dict[str, object], str | None]:
             for b in block:
                 if not b.strip() or b.lstrip().startswith("#"):
                     continue
-                sm = re.match(r"^\s+([A-Za-z0-9_.-]+):\s+(.*)$", b)
+                sm = re.match(r"^\s+([A-Za-z][A-Za-z0-9_.-]*):\s+(.*)$", b)
                 if not sm:
                     return fields, f"cannot parse frontmatter line: {b!r}"
                 value, err = _plain_scalar(sm.group(2).strip())
                 if err:
                     return fields, f"'{key}.{sm.group(1)}' {err}"
+                if sm.group(1) in sub:
+                    return fields, f"duplicate key '{key}.{sm.group(1)}'"
                 sub[sm.group(1)] = value
             fields[key] = sub
     return fields, None
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, object], str | None]:
-    """Return (frontmatter fields, error). Uses PyYAML when installed."""
+    """Return (frontmatter fields, error).
+
+    Deliberately accepts only a strict YAML subset (plain or quoted scalars,
+    block scalars, one-level maps) so the verdict is the same everywhere and
+    anything a YAML loader could read differently is rejected.
+    """
     src, err = split_frontmatter(text)
     if err or src is None:
         return {}, err
-    try:
-        import yaml  # type: ignore[import-untyped]
-    except ImportError:
-        return parse_frontmatter_subset(src)
-    try:
-        data = yaml.safe_load(src) if src.strip() else {}
-    except yaml.YAMLError as exc:
-        return {}, f"frontmatter is not valid YAML: {str(exc).splitlines()[0]}"
-    if not isinstance(data, dict):
-        return {}, "frontmatter is not a YAML mapping"
-    return {str(k): v for k, v in data.items()}, None
+    return parse_frontmatter_subset(src)
 
 
 def type_errors(fields: dict[str, object]) -> list[str]:
     errs = [f"'{k}' must be a string" for k in STRING_KEYS if k in fields and not isinstance(fields[k], str)]
     errs += [f"'{k}' must be true or false" for k in BOOL_KEYS if k in fields and not isinstance(fields[k], bool)]
-    meta = fields.get("metadata")
-    if meta is not None and not (isinstance(meta, dict) and all(isinstance(v, str) for v in meta.values())):
+    meta = fields.get("metadata", {})
+    if not (isinstance(meta, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in meta.items())):
         errs.append("'metadata' must map keys to string values")
     return errs
 
 
-def sidecar_disables_implicit(path: Path) -> bool:
-    """True if agents/openai.yaml sets policy.allow_implicit_invocation to false."""
-    if not path.is_file():
-        return False
-    text = path.read_text(encoding="utf-8")
-    try:
-        import yaml  # type: ignore[import-untyped]
-
-        data = yaml.safe_load(text)
-        policy = data.get("policy") if isinstance(data, dict) else None
-        return isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False
-    except ImportError:
-        pass
-    except Exception:  # noqa: BLE001 - any parse failure means "not disabled"
-        return False
-    in_policy = False
+def sidecar_disables_implicit(text: str) -> bool:
+    """True if agents/openai.yaml sets policy.allow_implicit_invocation: false as a direct child."""
+    in_policy, child_indent, found = False, None, False
     for line in text.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if not line[0].isspace():
-            in_policy = line.split("#")[0].strip() == "policy:"
-        elif in_policy and re.match(r"^\s+allow_implicit_invocation:\s*false\s*(#.*)?$", line):
-            return True
-    return False
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_policy, child_indent = re.fullmatch(r"policy:\s*(#.*)?", line.strip()) is not None, None
+            continue
+        if not in_policy:
+            continue
+        if child_indent is None:
+            child_indent = indent
+        if indent == child_indent:
+            m = re.fullmatch(r"allow_implicit_invocation:\s*(\S+)\s*(#.*)?", line.strip())
+            if m:
+                if found:
+                    return False  # duplicate key: ambiguous
+                found = m.group(1) == "false"
+                if not found:
+                    return False
+    return found
 
 
 def strip_code(text: str) -> str:
@@ -190,15 +192,24 @@ def strip_code(text: str) -> str:
 
 class Checker:
     def __init__(self, root: Path) -> None:
-        self.root = root
+        self.root = root.resolve()
         self.findings: list[dict[str, str]] = []
+
+    def read(self, path: Path) -> str | None:
+        """Read a UTF-8 file, recording a finding instead of raising."""
+        try:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            self.add("error", f"cannot read {path.relative_to(self.root).as_posix()}: {exc.__class__.__name__}")
+            return None
 
     def add(self, level: str, msg: str) -> None:
         self.findings.append({"skill": self.root.name, "level": level, "message": msg})
 
     def run(self) -> list[dict[str, str]]:
-        skill_md = self.root / "SKILL.md"
-        text = skill_md.read_text(encoding="utf-8")
+        text = self.read(self.root / "SKILL.md")
+        if text is None:
+            return self.findings
         fields, err = parse_frontmatter(text)
         if err:
             self.add("error", err)
@@ -250,7 +261,9 @@ class Checker:
         user_only = fields.get("disable-model-invocation") is True
         if user_only and fields.get("user-invocable") is False:
             self.add("error", "both invocation paths are disabled; the skill is unreachable")
-        if user_only and not sidecar_disables_implicit(self.root / "agents" / "openai.yaml"):
+        sidecar = self.root / "agents" / "openai.yaml"
+        sidecar_text = self.read(sidecar) if sidecar.is_file() else ""
+        if user_only and not sidecar_disables_implicit(sidecar_text or ""):
             self.add("error", "user-only skill needs agents/openai.yaml setting policy.allow_implicit_invocation: false")
         compat = fields.get("compatibility")
         if isinstance(compat, str) and len(compat) > 500:
@@ -260,7 +273,9 @@ class Checker:
         intent = self.root / "INTENT.md"
         if not intent.is_file():
             return
-        text = intent.read_text(encoding="utf-8")
+        text = self.read(intent)
+        if text is None:
+            return
         for heading in ("## Goals", "## Requirements", "## Log"):
             if not re.search(rf"^{re.escape(heading)}\s*$", text, re.M):
                 self.add("warning", f"INTENT.md has no '{heading}' section")
@@ -280,14 +295,21 @@ class Checker:
         for doc in docs:
             if not doc.is_file():
                 continue
-            for target in LINK_RE.findall(strip_code(doc.read_text(encoding="utf-8"))):
+            text = self.read(doc)
+            if text is None:
+                continue
+            for target in LINK_RE.findall(strip_code(text)):
                 if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
                     continue
                 path = target.split("#", 1)[0]
                 if path.startswith("<") or "<" in path:
                     continue
-                if not (doc.parent / path).exists():
-                    self.add("error", f"{doc.relative_to(self.root).as_posix()}: broken link '{target}'")
+                where = doc.relative_to(self.root).as_posix()
+                resolved = (doc.parent / path).resolve()
+                if not resolved.exists():
+                    self.add("error", f"{where}: broken link '{target}'")
+                elif resolved != self.root and self.root not in resolved.parents:
+                    self.add("error", f"{where}: link '{target}' leaves the skill folder and breaks once installed")
 
 
 def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:

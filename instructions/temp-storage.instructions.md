@@ -20,7 +20,7 @@ preservation, rollback, debugging, and inter-agent coordination.
   info/          # Inferred/cached information
 ```
 
-Skills write to `.tmp/<skill-name>/` instead.
+Skills put their workspace scratch in `.tmp/<skill-name>/`. Output meant for the user with no project home, such as a handoff, follows that skill's own destination.
 
 **Naming**: `{kind}-{YYYYMMDD-HHMMSS}-{description}.{ext}` in local time,
 for example `report-20261122-175433-auth-flow.md`. Never overwrite; on a
