@@ -78,6 +78,7 @@ function Main {
     [string]$InputPath
   )
 
+  Write-Verbose "Script version $ScriptVersion"
   $processor = [ExampleProcessor]::new($InputPath)
   return $processor.Execute()
 }

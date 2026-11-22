@@ -109,7 +109,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, python: "3.9" }
+          # setup-python has no 3.9 build for the newest Ubuntu image.
+          - { os: ubuntu-24.04, python: "3.9" }
           - { os: ubuntu-latest, python: "3.x" }
           - { os: windows-latest, python: "3.x" }
           - { os: macos-latest, python: "3.x" }
@@ -125,7 +126,7 @@ jobs:
         run: python -m pytest -c .github/ci/pytest.ini --rootdir . --junit-xml=junit.xml
       - name: Publish test report
         # Fork PRs get a read-only token, so they cannot create the check run.
-        if: ${{ !cancelled() && !github.event.pull_request.head.repo.fork }}
+        if: ${{ !cancelled() && hashFiles('junit.xml') != '' && !github.event.pull_request.head.repo.fork }}
         uses: mikepenz/action-junit-report@v6
         with:
           report_paths: junit.xml
