@@ -32,30 +32,23 @@ and 2.1.327.
 | Uncommitted work | default, or `--uncommitted` |
 | A different repository | `--cwd PATH` |
 
-For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current, and fetch the PR head into a remote-tracking ref, not only `FETCH_HEAD`, so the
-cleanup check below sees its commits as already on a remote: on GitHub
+For a PR, fetch first, so the base is current, and fetch the PR head into a
+remote-tracking ref rather than only `FETCH_HEAD`: on GitHub
 `git fetch origin refs/pull/<n>/head:refs/remotes/origin/pr/<n>`, on GitLab
-`git fetch origin refs/merge-requests/<n>/head:refs/remotes/origin/mr/<n>`.
+`git fetch origin refs/merge-requests/<n>/head:refs/remotes/origin/mr/<n>`. Review from a
+checkout of that ref, preferably a worktree of the user's existing clone. On every round,
+confirm the checkout's `HEAD` equals the fetched ref before starting the job; if it is
+behind and clean, move it to the ref, and if it has local edits, stop and report.
 
-With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`. Use the
-user's scratch location if their instructions define one. Otherwise:
+With no local clone, put the clone wherever the user's scratch or temp-storage rules say.
+If they have none, ask the user where to clone rather than picking a location.
 
-| OS | Scratch root | Before creating or removing anything there |
-| --- | --- | --- |
-| Windows | `%TEMP%\agent-skills\scratch\` | `%TEMP%` is absolute and inside `%USERPROFILE%`; no component from `%USERPROFILE%` down to the clone is a junction or symlink |
-| macOS, Linux | `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/` | the base is absolute and either owned by you and not group- or other-writable, or sticky and owned by you or `root`; `agent-skills-<uid>` is owned by you with mode `0700`; no component below the base is a symlink |
-
-In both cases the resolved clone path must sit inside the scratch root. If a check fails,
-stop and report it.
-
-Reuse the clone for later review rounds. If it must outlive seven days, or the user asks to
-keep it, create an empty `KEEP` file in it so stale-scratch sweeps skip it, and remove the
-file when retention ends. When the review loop ends, also when it fails, remove the clone
-only after confirming it holds no unique work: no working-tree edits, untracked files,
-stashes, or unpushed commits (`git log HEAD --branches --not --remotes`). After a `--fix`
-run, move the fixes to the intended checkout first. If any check finds unique work or
-cannot run, keep the clone (with `KEEP`) and report its path.
+When the review loop ends, also when it fails, remove only a clone or worktree you
+created, and only after confirming it holds no unique work, in it and in every nested
+checkout (submodules): no working-tree edits, untracked files, stashes, or unpushed
+commits (`git log HEAD --branches --not --remotes`). After a `--fix` run, move the fixes to
+the intended checkout first. If any check finds unique work or cannot run, keep it and
+report its path.
 
 ## Fixing: `--fix`
 
