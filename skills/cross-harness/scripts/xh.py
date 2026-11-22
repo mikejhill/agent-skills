@@ -26,6 +26,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -758,15 +759,17 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     if job["target"] != "codex" or not IS_WIN:
         return out_path, None
     try:
-        # Only a temp dir inside the user's profile (the default %TEMP%) is known to be
-        # private: older Pythons ignore mkdtemp's 0o700 mode on Windows, so the dir
-        # inherits its parent's ACL. A shared TMPDIR falls back to the job dir.
+        # Only a temp dir inside the user's profile (the default %TEMP%) is trusted:
+        # older Pythons ignore mkdtemp's 0o700 mode on Windows, so the dir inherits
+        # its parent's ACL. The default %TEMP% sits in %LOCALAPPDATA%, the same
+        # tree the job dir inherits from, so this exposes nothing new. A TMPDIR
+        # outside the profile may be shared and falls back to the job dir.
         tmp = Path(tempfile.gettempdir()).resolve()
         profile = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
         if profile not in tmp.parents:
             return out_path, None
         scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-", dir=tmp))
-    except OSError:  # includes no usable temp dir at all
+    except (OSError, RuntimeError):  # no usable temp dir, or no resolvable profile
         return out_path, None
     return scratch / out_path.name, scratch
 
@@ -783,9 +786,13 @@ def collect_output(cli_out: Path, out_path: Path, scratch):
         return None
     staging = None
     try:
-        if cli_out.is_symlink():  # Codex writes a plain file; never follow a planted link
-            raise OSError(f"{cli_out} is a link, not the file Codex wrote")
-        if cli_out.is_file():
+        try:
+            st = os.lstat(cli_out)  # raises on access errors; only "missing" means no result
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat.S_ISREG(st.st_mode):  # never follow a planted link
+            raise OSError(f"{cli_out} is not the plain file Codex writes")
+        if st is not None:
             data = cli_out.read_bytes()
             fd, staging = tempfile.mkstemp(prefix=out_path.name + ".", suffix=".partial", dir=out_path.parent)
             with os.fdopen(fd, "wb") as f:  # created exclusively: never an existing file or link
