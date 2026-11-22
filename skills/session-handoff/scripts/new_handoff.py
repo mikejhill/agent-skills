@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import errno
 import json
 import os
 import re
@@ -22,6 +23,7 @@ IS_WINDOWS = os.name == "nt"
 
 
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+WRITE_FAILURES = {errno.EACCES, errno.EPERM, errno.EROFS, errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 MAX_SLUG = 60  # keeps names far below the 255-byte component limit
 
 
@@ -71,9 +73,9 @@ def _check_root(value: str) -> Path:
         return path
     info = os.stat(path)
     owned_private = info.st_uid == os.getuid() and not stat.S_IMODE(info.st_mode) & 0o022
-    sticky = bool(info.st_mode & stat.S_ISVTX)
+    sticky = bool(info.st_mode & stat.S_ISVTX) and info.st_uid in (0, os.getuid())
     if not (owned_private or sticky):
-        raise Unusable("writable by others without the sticky bit")
+        raise Unusable("writable by others, and not sticky with a trusted owner")
     return path
 
 
@@ -87,7 +89,9 @@ def _handoff_dir(root: Path) -> Path:
         directory = root / "agent-handoffs"
         try:
             directory.mkdir(exist_ok=True)
-        except PermissionError as exc:
+        except OSError as exc:
+            if not _is_write_failure(exc):
+                raise
             raise Unusable(f"cannot create {directory}: {exc}") from exc
         if _is_link_or_junction(directory) or not directory.is_dir():
             raise SystemExit(f"error: {directory} is a link, junction, or not a directory")
@@ -99,7 +103,9 @@ def _handoff_dir(root: Path) -> Path:
         directory.mkdir(mode=0o700)
     except FileExistsError:
         pass
-    except PermissionError as exc:
+    except OSError as exc:
+        if not _is_write_failure(exc):
+            raise
         raise Unusable(f"cannot create {directory}: {exc}") from exc
     info = os.lstat(directory)
     if not stat.S_ISDIR(info.st_mode):
@@ -111,12 +117,17 @@ def _handoff_dir(root: Path) -> Path:
     return directory
 
 
-def private_handoff_dir() -> Path:
-    """Return the first usable private handoff directory. Never the cwd."""
+def _is_write_failure(exc: OSError) -> bool:
+    """Errors that mean "this root cannot take a new file": try the next root."""
+    return exc.errno in WRITE_FAILURES or isinstance(exc, PermissionError)
+
+
+def reserve_handoff(slug: str) -> Path:
+    """Reserve a file in the first usable private handoff directory. Never the cwd."""
     reasons = []
     for value in _candidate_roots():
         try:
-            return _handoff_dir(_check_root(value))
+            return reserve_file(_handoff_dir(_check_root(value)), slug)
         except Unusable as exc:
             reasons.append(f"{value or '(unset)'}: {exc}")
     raise SystemExit("error: no usable temp directory\n  " + "\n  ".join(reasons))
@@ -140,9 +151,13 @@ def reserve_file(directory: Path, slug: str) -> Path:
             fd = os.open(path, flags, 0o600)
         except FileExistsError:
             continue
+        except OSError as exc:
+            if not _is_write_failure(exc):
+                raise
+            raise Unusable(f"cannot create {path}: {exc}") from exc
         os.close(fd)
         return path
-    raise SystemExit(f"error: could not reserve a unique file name in {directory}")
+    raise Unusable(f"no free file name in {directory}")
 
 
 def main() -> None:
@@ -150,7 +165,7 @@ def main() -> None:
     parser.add_argument("slug", nargs="*", help="2-5 words naming the goal or focus")
     args = parser.parse_args()
 
-    path = reserve_file(private_handoff_dir(), slugify(" ".join(args.slug)))
+    path = reserve_handoff(slugify(" ".join(args.slug)))
     json.dump({"path": str(path), "uri": path.as_uri()}, sys.stdout)
     sys.stdout.write("\n")
 
