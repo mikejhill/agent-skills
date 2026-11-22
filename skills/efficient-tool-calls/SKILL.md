@@ -15,8 +15,8 @@ minutes. Spend fewer, better calls.
 ## Rules
 
 1. **Batch predictable steps.** Put steps whose outcome you can predict in one call.
-   Chain dependent steps with `&&` (PowerShell 7: `&&`; Windows PowerShell 5: `;` plus
-   `if ($LASTEXITCODE -eq 0)` after native commands). Run independent reads in parallel if your harness allows several tool
+   Chain dependent steps with `&&` (PowerShell 7: `&&`; Windows PowerShell 5: `cmd1; if ($?) { cmd2 }`,
+   without `2>&1` on `cmd1`, which can make `$?` false on success). Run independent reads in parallel if your harness allows several tool
    calls at once. Stop batching at a point where you need to look at the result to decide,
    and before any step the user must confirm.
 2. **Keep commands short.** Call a script file instead of pasting long inline code; reuse
@@ -58,9 +58,15 @@ python <skill-dir>/scripts/shell_probe.py   # Windows: python or py -3; else pyt
 - It compares against PowerShell 7 (`pwsh`) when installed. Windows PowerShell 5.1 often
   starts faster but lacks `&&`, ternaries and UTF-8 defaults; it is reported for
   information only, and isn't a reason to switch.
+- The recommendation names the executable it measured (on Windows, Git Bash even when
+  `bash` on PATH is the WSL launcher). If your harness starts a different copy, the
+  numbers don't apply to it.
+- A gap close to 150 ms can come out either side between runs; treat 150–200 ms as a weak
+  preference.
 - The result is cached per machine for 7 days, so later calls return at once
-  (`"cached": true`). `--force` re-measures; re-measure after installing or upgrading a
-  shell, changing antivirus, or when calls feel slower than the cached numbers say.
+  (`"cached": true`). `--force` re-measures. The cache is also skipped when the shells found on
+  PATH differ from the cached run or `--runs` asks for more samples; re-measure after
+  upgrading a shell, changing antivirus, or when calls feel slower than the cache says.
 - `profile_cost_ms` appears when loading the PowerShell profile adds 150 ms or more, and
   `login_cost_ms` when a login shell does. They matter only if your harness loads the
   profile for each call.

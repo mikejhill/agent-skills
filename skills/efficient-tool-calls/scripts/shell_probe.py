@@ -45,17 +45,30 @@ def cache_path():
 
 
 def find_exe(name, skip=None):
-    """Look `name` up on PATH, absolute directories only. Unlike shutil.which on Windows
-    Python <= 3.11, never the current directory, so a workspace can't plant a `pwsh.exe`."""
+    """Look `name` up on PATH, absolute directories only, skipping the current directory and
+    everything under it (shutil.which on Windows Python <= 3.11 searches the current directory
+    first), so a workspace can't plant a `pwsh.exe`."""
     exts = [""]
     if IS_WIN:
         exts = [e for e in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if e]
         if os.path.splitext(name)[1]:
             exts = [""] + exts
-    cwd = os.path.normcase(os.path.abspath(os.getcwd()))
+    cwd = os.path.normcase(os.path.realpath(os.getcwd()))
+    home = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
+    try:  # run from home or a drive root, "under cwd" would cover user installs: only skip cwd
+        broad = os.path.commonpath([home, cwd]) == cwd
+    except ValueError:
+        broad = False
     for d in os.environ.get("PATH", "").split(os.pathsep):
         d = d.strip('"')
-        if not d or not os.path.isabs(d) or os.path.normcase(os.path.abspath(d)) == cwd:
+        if not d or not os.path.isabs(d):
+            continue
+        rd = os.path.normcase(os.path.realpath(d))
+        try:
+            inside = rd == cwd if broad else os.path.commonpath([rd, cwd]) == cwd
+        except ValueError:  # different drives
+            inside = False
+        if inside:  # the workspace or anything under it (e.g. an activated project env)
             continue
         for e in exts:
             f = os.path.join(d, name + e)
@@ -192,8 +205,10 @@ def recommend(shells):
                                    % abs(diff))
         else:
             fast, slow = (px[1], ps[1]) if diff > 0 else (ps[1], px[1])
-            r["recommendation"] = ("prefer %s for general command-line work: %d ms faster to start per call "
-                                   "than %s; keep %s for work only it can do" % (fast, abs(diff), slow, slow))
+            path = shells[fast].get("path")
+            r["recommendation"] = ("prefer %s%s for general command-line work: %d ms faster to start per call "
+                                   "than %s; keep %s for work only it can do"
+                                   % (fast, " (%s)" % path if path else "", abs(diff), slow, slow))
     else:
         found = [k for k, v in shells.items() if "-" not in v.get("family", "")]
         if px or ps:
@@ -233,7 +248,12 @@ def measure(runs):
     return res
 
 
-def valid_cache(c):
+def inventory():
+    """Shell name -> executable for the shells this process would measure (no timing)."""
+    return {name: argv[0] for name, _fam, argv in candidates()}
+
+
+def valid_cache(c, runs):
     """A fresh, well-formed record for this host and platform, with derived fields recomputed."""
     if not (isinstance(c, dict) and c.get("v") == CACHE_VERSION and c.get("host") == socket.gethostname()
             and c.get("platform") == sys.platform and isinstance(c.get("measured_at"), (int, float))):
@@ -241,6 +261,11 @@ def valid_cache(c):
     shells = c.get("shells")
     if not isinstance(shells, dict) or not shells:  # never reuse a run that found nothing
         return None
+    if not isinstance(c.get("runs"), int) or c["runs"] < runs:  # fewer samples than asked for
+        return None
+    inv, failed = inventory(), c.get("failed") or []
+    if set(inv) != set(shells) | set(failed) or any(inv[k] != v.get("path") for k, v in shells.items()):
+        return None  # another PATH or install: different shells than the cached run measured
     for v in shells.values():
         if not (isinstance(v, dict) and isinstance(v.get("median_ms"), (int, float))
                 and isinstance(v.get("p90_ms"), (int, float)) and isinstance(v.get("family"), str)):
@@ -262,7 +287,7 @@ def main(argv=None):
         try:
             with open(path, encoding="utf-8") as f:
                 c = json.load(f)
-            c = valid_cache(c)
+            c = valid_cache(c, max(1, a.runs))
             if c and time.time() - c["measured_at"] < a.max_age_days * 86400:
                 c["cached"] = True
                 print(json.dumps(c))

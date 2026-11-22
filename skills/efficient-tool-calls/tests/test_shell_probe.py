@@ -112,6 +112,47 @@ class Launch(unittest.TestCase):
         self.assertIsNone(sp.time_one([os.path.join(tempfile.gettempdir(), "no-such-shell-xyz")], 1))
         self.assertIsNotNone(sp.time_one([sys.executable, "-c", "pass"], 1))
 
+    def test_directories_under_workspace_are_not_searched(self):
+        with tempfile.TemporaryDirectory() as d:
+            sub = os.path.join(d, ".venv", "bin")
+            os.makedirs(sub)
+            exe = os.path.join(sub, "fakeshell-xyz" + (".exe" if os.name == "nt" else ""))
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(exe, 0o755)
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            os.chdir(d)
+            os.environ["PATH"] = os.pathsep.join([sub, oldpath])
+            try:
+                self.assertIsNone(sp.find_exe("fakeshell-xyz"))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+
+    def test_user_installs_found_when_run_from_home(self):
+        with tempfile.TemporaryDirectory() as d:
+            sub = os.path.join(d, "AppData", "Programs", "bin")
+            os.makedirs(sub)
+            exe = os.path.join(sub, "fakeshell-xyz" + (".exe" if os.name == "nt" else ""))
+            with open(exe, "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(exe, 0o755)
+            old, oldpath = os.getcwd(), os.environ.get("PATH", "")
+            oldhome = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+            os.chdir(d)
+            os.environ["PATH"] = os.pathsep.join([sub, oldpath])
+            os.environ["HOME"] = os.environ["USERPROFILE"] = d
+            try:
+                self.assertEqual(os.path.realpath(sp.find_exe("fakeshell-xyz")), os.path.realpath(exe))
+            finally:
+                os.chdir(old)
+                os.environ["PATH"] = oldpath
+                for k, v in oldhome.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+
     def test_current_directory_is_not_searched(self):
         with tempfile.TemporaryDirectory() as d:
             exe = os.path.join(d, "fakeshell-xyz" + (".exe" if os.name == "nt" else ""))
@@ -174,9 +215,24 @@ class Cache(unittest.TestCase):
             json.dump(obj, f)
 
     def test_other_platform_cache_ignored(self):
-        import socket
-        self.write_cache({"v": 1, "host": socket.gethostname(), "platform": "elsewhere",
-                          "measured_at": int(time.time()), "shells": {}})
+        good = self.run_probe()
+        self.assertTrue(self.run_probe()["cached"])
+        good["platform"] = "elsewhere"  # only the platform differs
+        self.write_cache(good)
+        self.assertFalse(self.run_probe()["cached"])
+
+    def test_more_runs_than_cached_remeasures(self):
+        self.run_probe()  # --runs 1
+        self.assertTrue(self.run_probe()["cached"])
+        p = subprocess.run([sys.executable, SCRIPT, "--runs", "2"], capture_output=True, text=True,
+                           env=self.env, timeout=120)
+        self.assertFalse(json.loads(p.stdout)["cached"])
+
+    def test_changed_inventory_remeasures(self):
+        good = self.run_probe()
+        name = next(iter(good["shells"]))
+        good["shells"][name]["path"] = "/elsewhere/" + name  # another install than PATH finds now
+        self.write_cache(good)
         self.assertFalse(self.run_probe()["cached"])
 
     def test_malformed_cache_is_a_miss(self):
