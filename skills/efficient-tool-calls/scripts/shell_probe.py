@@ -65,14 +65,16 @@ def find_exe(name, skip=None):
 
 
 def win_bash():
-    """Git Bash, not the WSL launcher in System32 (that starts a Linux VM)."""
-    wsl = lambda f: "system32" in f.lower()
-    cands = []
+    """Git Bash: the first native bash.exe on PATH, else a standard Git install. Never a WSL
+    launcher (that starts a Linux VM)."""
+    def wsl(f):  # System32\bash.exe and the WindowsApps alias both start WSL
+        f = f.lower().replace("/", "\\")
+        return "\\system32\\" in f or "\\windowsapps\\" in f
+    cands = [find_exe("bash", skip=wsl)]  # the copy a harness running `bash` gets, if on PATH
     for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"),
                  os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
         if root and os.path.isabs(root):  # an unset variable must not become a relative path
             cands.append(os.path.join(root, "Git", "bin", "bash.exe"))
-    cands.append(find_exe("bash", skip=wsl))  # keep searching PATH past the WSL launcher
     for c in cands:
         if c and os.path.isfile(c) and not wsl(c):
             return c
@@ -103,6 +105,16 @@ def candidates():
     return out
 
 
+def system_dir():
+    """The real Windows system directory (GetSystemDirectoryW), not a guessed drive."""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(260)
+    n = ctypes.windll.kernel32.GetSystemDirectoryW(buf, 260)
+    if not n or n >= 260:
+        raise OSError("GetSystemDirectoryW failed")
+    return buf.value
+
+
 def run_once(argv, kw, limit=30):
     """Seconds until the shell exits, or None if it fails. Waits on the process itself
     (no timeout polling, which adds up to 50 ms on POSIX); a timer enforces `limit`."""
@@ -120,8 +132,7 @@ def run_once(argv, kw, limit=30):
     def kill_tree():
         try:
             if IS_WIN:
-                root = os.environ.get("SystemRoot", "")
-                tk = os.path.join(root if os.path.isabs(root) else r"C:\Windows", "System32", "taskkill.exe")
+                tk = os.path.join(system_dir(), "taskkill.exe")
                 r = subprocess.run([tk, "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=10)
                 if r.returncode == 0:
                     return
@@ -139,6 +150,10 @@ def run_once(argv, kw, limit=30):
     try:
         code = p.wait()
         dt = time.perf_counter() - t
+    except BaseException:  # Ctrl+C: don't leave the sample's process group behind
+        kill_tree()
+        p.wait()
+        raise
     finally:
         killer.cancel()
     return dt if code == 0 else None
@@ -205,7 +220,7 @@ def measure(runs):
         t = time_one(argv, runs)
         if t:
             shells[name] = dict(t, family=fam, path=argv[0])
-        elif "-" not in fam:
+        else:  # every launch mode, so a harness using login/profile can see it is unusable
             failed.append(name)
     if not any(v["family"] == "powershell" for v in shells.values()):  # pwsh failed: 5.1 stands in
         for v in shells.values():

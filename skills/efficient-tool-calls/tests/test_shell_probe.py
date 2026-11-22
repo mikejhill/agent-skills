@@ -97,11 +97,13 @@ class Probe(unittest.TestCase):
                                       {"stdout": subprocess.DEVNULL}, limit=2))
         self.assertLess(time.time() - t, 15)
         time.sleep(1)
-        out = subprocess.run(["powershell", "-NoProfile", "-Command",
-                              "Get-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | "
-                              "Where-Object { $_.CommandLine -like '*127.0.0.29*' } | ForEach-Object ProcessId"],
-                             capture_output=True, text=True).stdout
-        self.assertNotRegex(out, r"\d", "ping survived the timeout")
+        q = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "$ErrorActionPreference = 'Stop'; "
+                            "Get-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | "
+                            "Where-Object { $_.CommandLine -like '*127.0.0.29*' } | ForEach-Object ProcessId"],
+                           capture_output=True, text=True)
+        self.assertEqual(q.returncode, 0, "process query failed: " + q.stderr)
+        self.assertNotRegex(q.stdout, r"\d", "ping survived the timeout")
 
 
 class Launch(unittest.TestCase):
