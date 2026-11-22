@@ -1,0 +1,4 @@
+# Test runner for the script tests. The skills' scripts support Python 3.9+,
+# and pytest 9 needs 3.10+, so the oldest leg uses pytest 8.
+pytest==9.2.0; python_version >= "3.10"
+pytest==8.4.2; python_version < "3.10"

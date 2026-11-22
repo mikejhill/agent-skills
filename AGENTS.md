@@ -18,5 +18,6 @@ This repository is a feature library for other workspaces, not a project workspa
 - Names are lowercase and hyphen-separated.
 - Content is harness-neutral: no tool names, invocation syntax (`#tool:`, `#file:`), or paths specific to one harness. Use the portable Agent Skills format.
 - Content must be public-safe: no credentials, private hostnames, personal account data, or machine-specific absolute paths. Personal or private items belong in the separate private library.
-- Run `npx markdownlint-cli2` before committing Markdown.
+- Run the checks in the README's Checks section before committing. CI runs the same checks, and `main` requires `ci-pass`.
+- Merge a pull request only after `ci-pass` is green on its latest commit. Prefer auto-merge. The owner's ruleset bypass is for the owner to use explicitly; agents never use it.
 - After changes, run `skillsinc plan` and review the result before `skillsinc sync`.

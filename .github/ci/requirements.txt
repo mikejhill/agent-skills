@@ -1,0 +1,7 @@
+# Pinned CI tooling. Dependabot (pip) keeps these current.
+ruff==0.17.6
+yamllint==1.38.0
+shellcheck-py==0.11.0.1
+actionlint-py==1.7.12.25
+# skills-ref is not published with its CLI on PyPI; pin the reference implementation by commit.
+skills-ref @ git+https://github.com/agentskills/agentskills@83021e2be457a9b6679148719c1f6074f0ad975e#subdirectory=skills-ref

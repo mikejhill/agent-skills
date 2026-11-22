@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: PR title (Conventional Commits)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  markdown:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DavidAnson/markdownlint-cli2-action@v25
+
+  skills:
+    name: Skill format (skills-ref + skill-development)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/ci/requirements.txt
+      - run: pip install -r .github/ci/requirements.txt
+      - name: skills-ref validate
+        run: python .github/ci/skills_ref_check.py
+      - name: skill-development checker
+        run: python skills/skill-development/scripts/check_skill.py skills
+
+  lint:
+    name: Code lint (ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: .github/ci/requirements.txt
+      - run: pip install -r .github/ci/requirements.txt
+      - name: ruff
+        if: ${{ !cancelled() }}
+        run: ruff check --output-format=github .
+      - name: shellcheck
+        if: ${{ !cancelled() }}
+        run: |
+          mapfile -t files < <(
+            { git ls-files '*.sh' '*.bash'
+              git ls-files | while IFS= read -r f; do
+                [ -f "$f" ] && head -n1 "$f" | grep -qE '^#!.*\b(ba|da|k)?sh\b' && echo "$f"
+              done
+            } | sort -u)
+          echo "Checking ${#files[@]} file(s)"
+          [ "${#files[@]}" -eq 0 ] || shellcheck --format=gcc "${files[@]}"
+      - name: PSScriptAnalyzer
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force
+          $files = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
+          Write-Host "Checking $($files.Count) file(s)"
+          $findings = @($files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning, Error })
+          foreach ($f in $findings) {
+            Write-Host "::error file=$($f.ScriptPath -replace [regex]::Escape("$PWD/"), ''),line=$($f.Line)::$($f.RuleName): $($f.Message)"
+          }
+          if ($findings.Count) { exit 1 }
+      - name: yamllint
+        if: ${{ !cancelled() }}
+        run: yamllint --strict --format github .
+      - name: actionlint
+        if: ${{ !cancelled() }}
+        run: actionlint
+
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.9" }
+          - { os: ubuntu-latest, python: "3.x" }
+          - { os: windows-latest, python: "3.x" }
+          - { os: macos-latest, python: "3.x" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: .github/ci/requirements-test.txt
+      - run: pip install -r .github/ci/requirements-test.txt
+      - name: pytest (skill unit tests and script smoke tests)
+        run: python -m pytest -c .github/ci/pytest.ini --rootdir . --junit-xml=junit.xml
+      - name: Publish test report
+        # Fork PRs get a read-only token, so they cannot create the check run.
+        if: ${{ !cancelled() && !github.event.pull_request.head.repo.fork }}
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: junit.xml
+          check_name: Test report (${{ matrix.os }}, Python ${{ matrix.python }})
+          include_passed: true
+          detailed_summary: true
+          require_tests: true
+
+  ci-pass:
+    name: ci-pass
+    if: always()
+    needs: [pr-title, markdown, skills, lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::A required job ended with '$r'"; exit 1 ;;
+            esac
+          done

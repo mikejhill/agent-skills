@@ -219,7 +219,6 @@ def main():
         r.check("--settle-max caps settling with ok + busy report", res.get("settle") == "capped"
                 and res.get("busy") and "Chain done" not in res.get("text", "") and "warning:" in e, o + e)
         code, o, e = r.cli("nav", base + "late", "-t", tid, "--no-wait")
-        t0 = time.time()
         code, o, e = r.cli("wait", "-t", tid, "--for-text", "Late text")
         res = json.loads(o) if code == 0 else {}
         r.check("--for-text returns within 0.3 s of the text appearing", res.get("ok") and

@@ -1,6 +1,7 @@
 # Agent Skills
 
-[![Markdown Lint](https://github.com/mikejhill/agent-skills/actions/workflows/markdown-lint.yml/badge.svg?branch=main)](https://github.com/mikejhill/agent-skills/actions/workflows/markdown-lint.yml)
+[![CI](https://github.com/mikejhill/agent-skills/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikejhill/agent-skills/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Reusable skills, instructions, agents, prompts, and reference resources for AI coding assistants that follow the open [Agent Skills](https://agentskills.io) format and work across harnesses (Claude Code, Codex, and any other agent that reads `SKILL.md` folders).
 
@@ -43,6 +44,29 @@ skillsinc status   # remote check and error state for each source
 ```
 
 Without SkillSinc, copy a skill folder into your harness's skills directory (for example `~/.claude/skills/` or `~/.agents/skills/`).
+
+## Checks
+
+[CI](.github/workflows/ci.yml) runs on every pull request and on `main`. The `ci-pass` job aggregates the others and is the required check for merging.
+
+| Job | What it checks |
+| --- | --- |
+| Skill format | Every skill against the [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) reference validator and the `skill-development` checker |
+| Code lint | Python (ruff), shell (shellcheck), PowerShell (PSScriptAnalyzer), YAML (yamllint), and workflows (actionlint) |
+| Markdown lint | markdownlint-cli2 with [.markdownlint-cli2.jsonc](.markdownlint-cli2.jsonc) |
+| Tests | Skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
+| PR title | Conventional Commits |
+
+Run them locally from the repository root:
+
+```bash
+pip install -r .github/ci/requirements.txt -r .github/ci/requirements-test.txt
+python .github/ci/skills_ref_check.py
+python skills/skill-development/scripts/check_skill.py skills
+ruff check . && yamllint --strict . && actionlint
+npx markdownlint-cli2
+python -m pytest -c .github/ci/pytest.ini --rootdir .
+```
 
 ## License
 
