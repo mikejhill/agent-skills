@@ -278,50 +278,18 @@ def _():
     assert a[a.index("-s") + 1] == "read-only" and "review" not in a, a
 
 
-@case("codex final message is recovered from the JSON stream when -o is not written")
-def _():
-    jid = start("task", "-t", "codex", "NO_OUT_FILE")
-    r = run("wait", jid, "--timeout", "30", check=0)
-    assert job(jid)["status"] == "succeeded", job(jid)
-    assert "fake codex answer" in r.stdout and "progress:" not in r.stdout, r.stdout
-    jid = start("task", "-t", "codex", "NO_OUT_FILE PROGRESS_ONLY")
-    run("wait", jid, "--timeout", "30")
-    j = job(jid)
-    assert j["status"] == "failed", j
-    md = TMP / "home" / "jobs" / jid / "result.md"
-    assert not md.exists() or "progress:" not in md.read_text(), md.read_text()
-
-
-@case("stream recovery: empty final message fails; U+2028 stays in the answer")
-def _():
-    d = TMP / "parse"
-    d.mkdir()
-    msg = lambda t: json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": t}}, ensure_ascii=False)
-    done = json.dumps({"type": "turn.completed"})
-    log, out = d / "s.log", d / "r.md"
-    log.write_text("\n".join([msg("progress"), msg(""), done]) + "\n", encoding="utf-8")
-    xh.parse_outputs("codex", log, out)
-    assert not out.exists(), out.read_text()
-    tool = json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": "git diff"}})
-    log.write_text("\n".join([msg("Checking the diff"), tool, done]) + "\n", encoding="utf-8")
-    xh.parse_outputs("codex", log, out)
-    assert not out.exists(), out.read_text()
-    todo = json.dumps({"type": "item.completed", "item": {"type": "todo_list", "items": []}})
-    log.write_text("\n".join([msg("progress"), tool, msg("a\u2028b\r\nc"), todo, done]) + "\n", encoding="utf-8")
-    xh.parse_outputs("codex", log, out)
-    assert out.read_bytes() == "a\u2028b\r\nc".encode("utf-8"), out.read_bytes()
-
-
 @case("on Windows, codex -o goes to a temp dir and is moved into the job dir")
 def _():
     saved, saved_tmp = xh.IS_WIN, tempfile.tempdir
     xh.IS_WIN = True
     tempfile.tempdir = str(TMP / "t")  # keep in-process scratch dirs in the test tree
+    saved_profile = os.environ.get("USERPROFILE")
+    os.environ["USERPROFILE"] = str(TMP)  # the test tree stands in for the user profile
     try:
         out = TMP / "jobdir" / "result.md"
         out.parent.mkdir()
         cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x1"}, "result", out)
-        assert scratch and cli_out.parent == scratch and scratch.parent == TMP / "t", cli_out
+        assert scratch and cli_out.parent == scratch and scratch.parent == (TMP / "t").resolve(), cli_out
         cli_out.write_text("answer")
         xh.collect_output(cli_out, out, scratch)
         assert out.read_text() == "answer" and not scratch.exists()
@@ -331,21 +299,29 @@ def _():
         out.unlink()
         cli_out, scratch = xh.codex_output_path({"target": "codex", "id": "x3"}, "result", out)
         cli_out.write_text("full answer")
-        real = xh.shutil.copyfile
+        real = xh.os.replace
 
         def broken(src, dst):
-            Path(dst).write_text("full")
+            os.replace = real  # restore before raising
             raise OSError(28, "No space left on device")
-        xh.shutil.copyfile = broken
+        xh.os.replace = broken
         try:
             err = xh.collect_output(cli_out, out, scratch)
         finally:
-            xh.shutil.copyfile = real
+            xh.os.replace = real
         assert err and not out.exists() and not list(out.parent.glob("*.partial")), err
         assert cli_out.read_text() == "full answer" and str(cli_out) in err, "answer lost on copy failure"
         shutil.rmtree(scratch)
+        # A temp dir outside the user profile may be shared: use the job dir instead.
+        os.environ["USERPROFILE"] = str(TMP / "elsewhere")
+        same, none = xh.codex_output_path({"target": "codex", "id": "x4"}, "result", out)
+        assert same == out and none is None
     finally:
         xh.IS_WIN, tempfile.tempdir = saved, saved_tmp
+        if saved_profile is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = saved_profile
 
 
 @case("no job holds the repo after completion")

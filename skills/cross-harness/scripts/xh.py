@@ -758,9 +758,14 @@ def codex_output_path(job: dict, prefix: str, out_path: Path) -> tuple:
     if job["target"] != "codex" or not IS_WIN:
         return out_path, None
     try:
-        # mkdtemp creates the dir for this user only (mode 0o700; on Windows
-        # Python 3.13+ applies a matching ACL, and %TEMP% is per-user anyway).
-        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-"))
+        # Only a temp dir inside the user's profile (the default %TEMP%) is known to be
+        # private: older Pythons ignore mkdtemp's 0o700 mode on Windows, so the dir
+        # inherits its parent's ACL. A shared TMPDIR falls back to the job dir.
+        tmp = Path(tempfile.gettempdir()).resolve()
+        profile = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
+        if profile not in tmp.parents:
+            return out_path, None
+        scratch = Path(tempfile.mkdtemp(prefix=f"{job['id']}-{prefix}-", dir=tmp))
     except OSError:  # includes no usable temp dir at all
         return out_path, None
     return scratch / out_path.name, scratch
@@ -776,34 +781,34 @@ def collect_output(cli_out: Path, out_path: Path, scratch):
     """
     if not scratch:
         return None
-    err = None
-    staging = out_path.with_name(out_path.name + ".partial")
+    staging = None
     try:
         if cli_out.is_symlink():  # Codex writes a plain file; never follow a planted link
             raise OSError(f"{cli_out} is a link, not the file Codex wrote")
         if cli_out.is_file():
-            shutil.copyfile(cli_out, staging)
+            data = cli_out.read_bytes()
+            fd, staging = tempfile.mkstemp(prefix=out_path.name + ".", suffix=".partial", dir=out_path.parent)
+            with os.fdopen(fd, "wb") as f:  # created exclusively: never an existing file or link
+                f.write(data)
             os.replace(staging, out_path)
     except OSError as e:
-        err = f"could not copy the final message into the job dir ({e}); it is kept at {cli_out}"
-        try:
-            staging.unlink()
-        except OSError:
-            pass
-        return err
+        if staging:
+            try:
+                os.unlink(staging)
+            except OSError:
+                pass
+        return f"could not copy the final message into the job dir ({e}); it is kept at {cli_out}"
     shutil.rmtree(scratch, ignore_errors=True)
-    return err
+    return None
 
 
 def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_session=None) -> dict:
     """Read one CLI run's output files into result fields."""
     fields = {}
     if target == "codex":
-        session, errors, last_message, final_message = None, [], None, None
+        session, errors = None, []
         try:
-            # Split on "\n" only: str.splitlines() also splits at U+2028/U+2029,
-            # which are legal unescaped inside JSON strings.
-            for line in stdout_path.read_text(encoding="utf-8", errors="replace").split("\n"):
+            for line in stdout_path.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
                 if not line.startswith("{"):
                     continue
@@ -814,14 +819,6 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
                 typ = ev.get("type", "")
                 if typ in ("thread.started", "session.created", "session_configured"):
                     session = ev.get("thread_id") or ev.get("session_id") or session
-                elif typ in ("item.started", "item.updated", "item.completed"):
-                    item = ev.get("item") or {}
-                    if typ == "item.completed" and item.get("type") == "agent_message":
-                        last_message = item.get("text") or ""
-                    elif item.get("type") not in ("agent_message", "reasoning", "todo_list", "error"):
-                        last_message = None  # later work: an earlier message was progress
-                elif typ == "turn.completed":
-                    final_message, last_message = last_message, None
                 elif typ in ("error", "turn.failed"):
                     msg = ev.get("message") or (ev.get("error") or {}).get("message")
                     if msg:
@@ -829,19 +826,6 @@ def parse_outputs(target: str, stdout_path: Path, out_path: Path, fallback_sessi
         except OSError:
             pass
         fields["session"] = session or fallback_session
-        # Fallback when Codex completed a turn but did not write the -o file. Only the
-        # last message of a completed turn counts; a trailing progress update does not.
-        if final_message and not errors and not (out_path.is_file() and out_path.stat().st_size > 0):
-            staging = out_path.with_name(out_path.name + ".partial")
-            try:
-                staging.write_bytes(final_message.encode("utf-8"))  # no newline translation
-                os.replace(staging, out_path)
-            except OSError as e:
-                errors.append(f"could not write the recovered final message: {e}")
-                try:
-                    staging.unlink()
-                except OSError:
-                    pass
         if errors:
             fields["error"] = errors[-1]
     else:
@@ -916,10 +900,8 @@ def supervise(job_id: str) -> int:
         copy_err = collect_output(cli_out, out_path, scratch)
         fields.update(parse_outputs(job["target"], so_path, out_path, job.get("resume_session")))
         has = out_path.is_file() and out_path.stat().st_size > 0
-        if copy_err and not has:
+        if copy_err:
             fields["error"] = copy_err  # scratch kept: it holds the only copy
-        elif copy_err:
-            shutil.rmtree(scratch, ignore_errors=True)  # recovered from the stream instead
         fields["ok"] = fields["exit_code"] == 0 and has and not fields.get("error")
         if not fields["ok"] and not fields.get("error"):
             tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
