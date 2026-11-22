@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,32 @@ def run(*args: str | Path, timeout: int = 120, env: dict[str, str] | None = None
         cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run([str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=timeout, env=env, cwd=cwd, check=False)
+
+
+def run_tree(*args: str | Path, timeout: int, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run a long smoke script in its own process group; on timeout, kill the whole tree.
+
+    Output goes to files, not pipes, so a leftover grandchild holding an inherited handle
+    cannot block the wait after the kill.
+    """
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as out, \
+            tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as err:
+        group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+                 else {"start_new_session": True})
+        proc = subprocess.Popen([str(a) for a in args], stdout=out, stderr=err, cwd=cwd, **group)
+        try:
+            code = proc.wait(timeout)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(30)
+            out.seek(0)
+            pytest.fail(f"timed out after {timeout} s; process tree killed\n{out.read()}")
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(args, code, out.read(), err.read())
 
 
 def assert_ok(proc: subprocess.CompletedProcess[str]) -> None:
@@ -61,12 +89,12 @@ def test_cli_help(script: str) -> None:
 
 def test_cross_harness_smoke() -> None:
     skill = SKILLS / "cross-harness"
-    assert_ok(run(PY, skill / "tests" / "smoke_test.py", timeout=600, cwd=skill))
+    assert_ok(run_tree(PY, skill / "tests" / "smoke_test.py", timeout=600, cwd=skill))
 
 
 def test_browser_control_smoke() -> None:
     skill = SKILLS / "browser-control"
-    proc = run(PY, skill / "tests" / "smoke_test.py", timeout=900, cwd=skill)
+    proc = run_tree(PY, skill / "tests" / "smoke_test.py", timeout=900, cwd=skill)
     if not IN_CI and proc.returncode != 0 and "no chromium found" in (proc.stdout + proc.stderr).lower():
         pytest.skip("no Chromium-family browser on this machine")
     assert_ok(proc)

@@ -1,0 +1,17 @@
+# Lint every tracked PowerShell file with PSScriptAnalyzer; exit 1 on any warning or error.
+# Used by CI and by the README's local recipe. Run from the repository root.
+$ErrorActionPreference = 'Stop'
+$version = '1.24.0'
+if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -EQ $version)) {
+  Install-Module PSScriptAnalyzer -RequiredVersion $version -Scope CurrentUser -Force
+}
+Import-Module PSScriptAnalyzer -RequiredVersion $version
+$files = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
+if ($LASTEXITCODE) { throw 'git ls-files failed' }
+Write-Host "PSScriptAnalyzer: $($files.Count) file(s)"
+$findings = @($files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Severity Warning, Error })
+foreach ($f in $findings) {
+  $path = Resolve-Path -Relative $f.ScriptPath
+  Write-Host "::error file=$path,line=$($f.Line)::$($f.RuleName): $($f.Message)"
+}
+exit [int]($findings.Count -gt 0)

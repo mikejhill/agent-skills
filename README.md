@@ -63,9 +63,7 @@ Run them locally from the repository root (needs Python 3.11+, Node.js, and Powe
 pip install -r .github/ci/requirements.txt -r .github/ci/requirements-test.txt
 python .github/ci/skills_ref_check.py
 python skills/skill-development/scripts/check_skill.py skills
-ruff check . && yamllint --strict . && actionlint
-git ls-files '*.sh' | xargs shellcheck
-pwsh -c 'Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Scope CurrentUser -Force; $f = @(git ls-files "*.ps1" | % { Invoke-ScriptAnalyzer -Path $_ -Severity Warning,Error }); $f; exit [int][bool]$f.Count'
+.github/ci/lint.sh   # ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint (same as CI)
 npx markdownlint-cli2
 python -m pytest
 ```
