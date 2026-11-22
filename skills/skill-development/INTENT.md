@@ -1,0 +1,37 @@
+# Intent
+
+Teach agents to build and review skills that are concise, trigger accurately, load detail lazily, and follow one consistent set of library conventions across every harness. Replaces `writing-ai-instructions`.
+
+## Goals
+
+1. Skills an agent builds with this skill follow every requirement below, and this skill follows them itself.
+2. Skill content is concise and to the point. Nothing an agent would do correctly unprompted is included.
+3. Descriptions let an agent decide immediately and accurately whether to load the skill.
+4. Detail that is not always needed loads lazily through progressive disclosure.
+5. Skills are consistent with each other in naming, metadata, structure, paths, file naming, and CLI usage.
+6. Skills work in every harness unless there is a specific reason not to.
+
+## Requirements
+
+- Skill contents are concise and to the point.
+- Descriptions are concise and give agents clear information, so they can immediately and accurately decide whether to pull in the skill.
+- Use progressive discovery for more detailed elements: lazy loading of details that are not always necessary, such as scenario-specific factors, detailed factors for higher-depth runs, troubleshooting, and scripts.
+- Use a standard path and file structure for contents.
+- Every skill has a `README.md` and an `INTENT.md`. Agents are unlikely to read either except when developing the skill.
+  - `README.md` is human-facing for users. It explains what the skill does, how it should be seen, and how it should be used, plus anything users should be aware of: dependencies, environment constraints, expected results, security factors, and the like. Humans typically give it no more than a cursory glance, so keep it short.
+  - `INTENT.md` is human-facing and agent-facing for skill developers. It explains the skill's purpose, constraints, requirements, and desired outcome. It is used during construction and iteration, and it should generally be possible to reconstruct the skill from it alone. It is often agent-written but must clearly reflect the asks of the human operator who created the skill.
+- Consistent naming: concise and clear. Use nouns when a skill covers a subject (`project-setup`, `java-development`, `python-development`). Avoid gerunds. Limit verbs to skills that perform an explicit action.
+- Consistent metadata that follows the Agent Skills specification as closely as possible. Be conservative but intelligent with user-invocation and model-invocation flags.
+- Consistent path patterns for shared references, such as how temp directories are referenced and used.
+- Ephemeral, temporary, or transitory files use a standard naming convention that includes the current date and/or time.
+- Skills that use CLIs follow a common pattern for placing and executing them. CLIs prefer a limited set of generally portable or widely available languages. When languages or behavior are OS-dependent, state this and/or provide solutions for other OSes.
+- Skills are compatible across all harnesses unless there is a specific reason not to be. A skill limited to specific harnesses says so clearly in its README.
+
+## Log
+
+- 2026-11-22: Rebuilt from scratch to replace `writing-ai-instructions`, which was out of date and imposed unwanted characteristics on created skills. Renamed. Requirements above are from the operator's request.
+- 2026-11-22: [agent] Named `skill-development`: a noun phrase that matches `skill-cli-development` and `python-development`. "skill-authoring" was rejected because "authoring" is a gerund.
+- 2026-11-22: [agent] Dropped the old skill's mandatory 8-section template, MUST/MUST NOT modality, banned-word list, personas, and 200-600 line target. These produced padded, stilted skills. The new targets are 200 or fewer lines for SKILL.md (500 hard limit) and 300 or fewer characters for descriptions.
+- 2026-11-22: [agent] The skill is model-invocable, so it loads whenever a skill is being written. The old skill was user-only, so it never triggered.
+- 2026-11-22: [agent] Conventions chosen: workspace scratch in `.tmp/<skill>/`; system temp, config, and cache under an `agent-skills/<skill>/` subfolder; ephemeral names `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` (this matches `session-handoff`); stdlib Python 3.9+ as the default script language, run from source; Codex `agents/openai.yaml` sidecar for user-only skills.
+- 2026-11-22: [agent] Added `## Requirements` to the INTENT format, so INTENT.md captures the operator's constraints verbatim and the skill can be rebuilt from it alone. Added `scripts/check_skill.py` for the deterministic checks.

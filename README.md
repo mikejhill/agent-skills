@@ -10,7 +10,7 @@ The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: Ski
 
 | Directory       | Contents                                                     |
 | --------------- | ------------------------------------------------------------ |
-| `skills/`       | One folder per skill, with `SKILL.md` and optional `references/`, `scripts/`, `assets/` |
+| `skills/`       | One folder per skill: `SKILL.md`, `README.md`, `INTENT.md`, and optional `references/`, `scripts/`, `assets/` (standards: `skills/skill-development`) |
 | `instructions/` | Always-on or scoped instruction files (`<name>.instructions.md`) |
 | `agents/`       | Custom agent definitions (`<name>.agent.md`)                 |
 | `prompts/`      | Explicit, repeatable prompt files (`<name>.prompt.md`)       |

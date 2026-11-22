@@ -6,7 +6,7 @@ This repository is a feature library for other workspaces, not a project workspa
 
 | Feature type       | Location                   | File pattern                      |
 | ------------------ | -------------------------- | --------------------------------- |
-| Skills             | `skills/<name>/`           | `SKILL.md` (required)             |
+| Skills             | `skills/<name>/`           | `SKILL.md`, `README.md`, `INTENT.md` (see `skill-development`) |
 | Instructions       | `instructions/`            | `<name>.instructions.md`          |
 | Agents             | `agents/`                  | `<name>.agent.md`                 |
 | Prompts            | `prompts/`                 | `<name>.prompt.md`                |
