@@ -348,13 +348,18 @@ class Checker:
             # Any instruction filename is an explicit dependency, installed or not.
             for m in re.finditer(r"(?<![\w.-])([a-z0-9]+(?:-[a-z0-9]+)*)\.instructions\.md\b", prose):
                 hits.add(("instruction", m.group(1)))
-            # Known siblings: inline code, a path component, or a hyphenated name next to its type.
             for kind, name in names:
-                n = rf"(?<![\w.-]){re.escape(name)}(?![\w-]|\.instructions)"
-                pattern = rf"`{re.escape(name)}`|(?:^|[/\\]){re.escape(name)}[/\\]|\.\.[/\\]{re.escape(name)}\b"
-                if "-" in name:
-                    pattern += rf"|{n}(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+{n}"
-                if re.search(pattern, prose, re.M):
+                e = re.escape(name)
+                bare = rf"(?<![\w.-]){e}(?![\w-]|\.instructions)"
+                # A one-word name ("general") counts only in inline code; a hyphenated one also bare.
+                n = rf"(?:`{e}`|{bare})" if "-" in name else rf"`{e}`"
+                # Paths into a sibling folder break wherever it is absent, even in code blocks.
+                path = rf"(?:^|[\s`'\"(=])(?:\.\./|\.\.\\)+{e}(?=[/\\`'\")\s]|$)"
+                # Prose that names it as a type, or as the thing to follow.
+                ctx = (rf"{n}(?:'s)?\s+{kind}s?\b|\b{kind}s?\s+{n}"
+                       rf"|\b{kind}s?\s*\(?(?:such as|e\.g\.,?|like)\s+{n}"
+                       rf"|\b(?:follow(?:ing|s)?|see|per|use|using|defer to|load)\s+(?:the\s+)?{n}")
+                if re.search(path, text, re.M) or re.search(ctx, prose, re.I):
                     hits.add((kind, name))
             for kind, name in sorted(hits):
                 self.add("warning", f"{where} names the {kind} '{name}'; describe the capability instead so the skill stands alone")
