@@ -91,6 +91,7 @@ touches nothing outside the root.
   }
   if (-not $base.StartsWith($prof + '\', 'OrdinalIgnoreCase')) { throw "TEMP is outside the profile: $base" }
   & $assertNoLinks
+  $git = (Get-Command git -CommandType Application | Select-Object -First 1).Source  # throws if Git is missing
   New-Item -ItemType Directory -Force -Path $root | Out-Null
   & $assertNoLinks
   $unsaved = {
@@ -99,7 +100,7 @@ touches nothing outside the root.
     $out = @()
     foreach ($cmd in @(@('status', '--porcelain', '--untracked-files=all'), @('stash', 'list'),
                        @('log', 'HEAD', '--branches', '--not', '--remotes', '--oneline'))) {
-      $out += git -C $repo @cmd 2>&1
+      $out += & $git -C $repo @cmd 2>&1
       if ($LASTEXITCODE -ne 0) { return 'a Git check failed' }
     }
     if ($out) { return 'unsaved Git work' }
@@ -109,9 +110,11 @@ touches nothing outside the root.
     if (($d.Attributes -band $rp) -or ($d.Name -notmatch '^[a-z]+-(\d{8})-(\d{6})(-|$)') -or
         (($Matches[1] + $Matches[2]) -ge $cutoff) -or (Test-Path -LiteralPath (Join-Path $d.FullName 'KEEP'))) { continue }
     $why = $null
-    $nested = Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -Filter '.git' -ErrorAction SilentlyContinue |
+    $scanErr = $null
+    $nested = Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -Filter '.git' -ErrorAction SilentlyContinue -ErrorVariable scanErr |
       Where-Object { $_.FullName -ne (Join-Path $d.FullName '.git') }
-    if ($nested) { $why = 'a Git checkout below the top level' }
+    if ($scanErr) { $why = 'the folder scan failed' }
+    elseif ($nested) { $why = 'a Git checkout below the top level' }
     elseif (Test-Path -LiteralPath (Join-Path $d.FullName '.git')) { $why = & $unsaved $d.FullName }
     if ($why) { Write-Warning "kept ($why): $($d.FullName)"; continue }
     Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction Continue
@@ -122,18 +125,26 @@ touches nothing outside the root.
 ```sh
 (
   set -u
-  case "${TMPDIR:-}" in /*) base="${TMPDIR%/}" ;; *) base=/tmp ;; esac
-  parent="$base/agent-skills-$(id -u)"; root="$parent/scratch"
+  uid=$(id -u)
+  fail() { echo "$1" >&2; exit 1; }
+  command -v git >/dev/null || fail "git not found"
   mode() { ls -ldn "$1" | cut -c1-10; }
   owner() { ls -ldn "$1" | awk '{print $3}'; }
-  # Base: yours or root's, and either not writable by others or sticky (like /tmp).
-  [ -d "$base" ] && [ ! -L "$base" ] || { echo "unsafe temp base: $base" >&2; exit 1; }
-  case "$(owner "$base")" in 0|"$(id -u)") ;; *) echo "unsafe temp base: $base" >&2; exit 1 ;; esac
-  case "$(mode "$base")" in ?????w????|????????w?) case "$(mode "$base")" in *t|*T) ;; *) echo "unsafe temp base: $base" >&2; exit 1 ;; esac ;; esac
-  unsafe() { [ -L "$1" ] || [ ! -d "$1" ] || [ "$(owner "$1")" != "$(id -u)" ] || [ "$(mode "$1" | cut -c5-10)" != "------" ]; }
-  if [ -e "$parent" ] || [ -L "$parent" ]; then unsafe "$parent" && { echo "unsafe: $parent" >&2; exit 1; }; fi
-  (umask 077; mkdir -p "$root") || exit 1
-  if unsafe "$parent" || unsafe "$root"; then echo "unsafe: $root" >&2; exit 1; fi
+  # Trusted: a real directory owned by you or root, not writable by others unless sticky.
+  trusted() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    case "$(owner "$1")" in 0|"$uid") ;; *) return 1 ;; esac
+    case "$(mode "$1")" in ?????w????|????????w?) case "$(mode "$1")" in *t|*T) ;; *) return 1 ;; esac ;; esac
+  }
+  private() { [ -d "$1" ] && [ ! -L "$1" ] && [ "$(owner "$1")" = "$uid" ] && [ "$(mode "$1" | cut -c5-10)" = "------" ]; }
+  case "${TMPDIR:-}" in /*) base="$TMPDIR" ;; *) base=/tmp ;; esac
+  base=$(cd "$base" 2>/dev/null && pwd -P) || fail "no temp base"  # physical path (macOS /tmp -> /private/tmp)
+  p="$base"
+  while :; do trusted "$p" || fail "unsafe temp path: $p"; [ "$p" = / ] && break; p=$(dirname "$p"); done
+  parent="$base/agent-skills-$uid"; root="$parent/scratch"
+  if [ -e "$parent" ] || [ -L "$parent" ]; then private "$parent" || fail "unsafe: $parent"; fi
+  (umask 077; mkdir -p "$root") || fail "cannot create $root"
+  private "$parent" && private "$root" || fail "unsafe: $root"
   unsaved() {
     out=$(git -C "$1" status --porcelain --untracked-files=all 2>&1 &&
           git -C "$1" stash list 2>&1 &&
@@ -145,7 +156,8 @@ touches nothing outside the root.
     ts=$(printf '%s\n' "${d##*/}" | sed -n 's/^[a-z][a-z]*-\([0-9]\{8\}\)-\([0-9]\{6\}\)\(-.*\)\{0,1\}$/\1\2/p')
     [ -n "$ts" ] && [ -d "$d" ] && [ ! -L "$d" ] && [ ! -e "$d/KEEP" ] && [ "$ts" -lt "$cutoff" ] || continue
     why=""
-    if [ -n "$(find "$d" -mindepth 2 -name .git -print -quit 2>/dev/null)" ]; then why="a Git checkout below the top level"
+    if ! nested=$(find "$d" -mindepth 2 -name .git -print 2>/dev/null); then why="the folder scan failed"
+    elif [ -n "$nested" ]; then why="a Git checkout below the top level"
     elif [ -e "$d/.git" ]; then why=$(unsaved "$d"); fi
     if [ -n "$why" ]; then echo "kept ($why): $d" >&2; else rm -rf -- "$d"; fi
   done

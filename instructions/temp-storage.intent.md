@@ -42,3 +42,8 @@ when to remove them, so nothing they create outlives its task on the user's mach
   `status.showUntrackedFiles`), stashes, commits on no remote, nested checkouts, or a
   failing check. PR heads are fetched into remote-tracking refs so clean review clones
   don't look unpushed.
+- 2026-11-22: [agent] Codex round 4 (final): a failed folder scan or a missing Git
+  now keeps the entry or stops the sweep; the Unix base is resolved to its physical
+  path (macOS `/tmp` is a link) and every ancestor must be trusted. Stopped after four
+  rounds, as with PRs #23 and #24, since later rounds found edge cases in the previous
+  round's fixes.
