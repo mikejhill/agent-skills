@@ -793,7 +793,13 @@ def collect_output(cli_out: Path, out_path: Path, scratch):
         if st is not None and not stat.S_ISREG(st.st_mode):  # never follow a planted link
             raise OSError(f"{cli_out} is not the plain file Codex writes")
         if st is not None:
-            data = cli_out.read_bytes()
+            fd = os.open(cli_out, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as src:
+                ost = os.fstat(src.fileno())
+                # The opened file must be the one inspected above, not a swapped-in link target.
+                if (ost.st_dev, ost.st_ino) != (st.st_dev, st.st_ino) or not stat.S_ISREG(ost.st_mode):
+                    raise OSError(f"{cli_out} changed while it was being collected")
+                data = src.read()
             fd, staging = tempfile.mkstemp(prefix=out_path.name + ".", suffix=".partial", dir=out_path.parent)
             with os.fdopen(fd, "wb") as f:  # created exclusively: never an existing file or link
                 f.write(data)
