@@ -1,6 +1,6 @@
 # Implementation guide
 
-`config_root()` and `user_cache()` stand for the standard config and cache locations. Ignore relative values of `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `LOCALAPPDATA`. The cache base is `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS, and `${XDG_CACHE_HOME:-~/.cache}` elsewhere: `${XDG_CONFIG_HOME:-~/.config}/agent-skills/<skill>/` and `<user-cache>/agent-skills/<skill>/`.
+`config_root()` and `user_cache()` stand for the standard config and cache locations. Ignore relative values of `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `LOCALAPPDATA`. The cache base is `%LOCALAPPDATA%` on Windows (or `%USERPROFILE%\AppData\Local` when it is unset or relative), `~/Library/Caches` on macOS, and `${XDG_CACHE_HOME:-~/.cache}` elsewhere: `${XDG_CONFIG_HOME:-~/.config}/agent-skills/<skill>/` and `<user-cache>/agent-skills/<skill>/`.
 
 ## Step 1: Implement AuthCallback
 

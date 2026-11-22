@@ -124,3 +124,4 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
 - 2026-11-22: [agent] Removed named references to other skills and instruction files; adjacent concerns are now described by capability ("any ... standards the user has") so the skill stands alone.
 - 2026-11-22: [agent] Codex review: kept the safeguards that used to come from the removed references inline (review-clone cleanup checks and scratch defaults, credential file permissions, verifying release prerequisites).
 - 2026-11-22: [agent] Codex round 2: inline scratch-path validation (absolute base, no links, resolved path inside root) and the remote-tracking fetch of PR heads, both previously supplied by the removed instruction reference.
+- 2026-11-22: [agent] Codex round 3: the review-clone procedure is now fully self-contained. It covers per-OS scratch roots with trust checks, host-specific PR/MR refspecs, the `KEEP` retention marker, and the unique-work check before removal.

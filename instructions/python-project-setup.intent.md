@@ -9,6 +9,7 @@ Give Python projects one setup profile (uv, required files, layout) that layers 
 
 ## Requirements
 
+- Applies to `**/*.py`, `**/pyproject.toml`, `**/uv.lock`, and `**/.python-version`.
 - Build tool is `uv` always, except for throwaway scripts.
 - Required files: `pyproject.toml`, `.python-version`, and a committed `uv.lock`.
 - Forbidden files: `main.py`, `setup.py`, `setup.cfg`, `Pipfile`, `requirements.txt`.

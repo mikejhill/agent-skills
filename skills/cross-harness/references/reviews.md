@@ -33,19 +33,29 @@ and 2.1.327.
 | A different repository | `--cwd PATH` |
 
 For a PR, check out its head branch or a worktree of it first. Fetch, so the base is
-current, and fetch the PR head into a remote-tracking ref
-(`git fetch origin pull/<n>/head:refs/remotes/origin/pr/<n>`), not only `FETCH_HEAD`, so the
-cleanup check below sees its commits as already on a remote. With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`,
-where `<scratch-root>` is the user's scratch location if their instructions define one, else
-`%TEMP%\agent-skills\scratch\` on Windows or `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/`
-elsewhere. The temp base must be absolute; `agent-skills-<uid>` must be owned by you with
-mode `0700`; no component below the base (`agent-skills…`, `scratch`, the clone) may be a
-symlink or junction; and the resolved clone path must sit inside the scratch root. Check
-this before creating or removing anything there, and stop if it fails. Reuse the clone for later review
-rounds. When the review loop ends, also when it fails, remove it only after confirming it
-holds no unique work: no working-tree edits, untracked files, stashes, or unpushed commits.
-After a `--fix` run, move the fixes to the intended checkout first. If any check finds
-unique work or cannot run, keep the clone and report its path.
+current, and fetch the PR head into a remote-tracking ref, not only `FETCH_HEAD`, so the
+cleanup check below sees its commits as already on a remote: on GitHub
+`git fetch origin refs/pull/<n>/head:refs/remotes/origin/pr/<n>`, on GitLab
+`git fetch origin refs/merge-requests/<n>/head:refs/remotes/origin/mr/<n>`.
+
+With no local clone, clone into `<scratch-root>/clone-<YYYYMMDD-HHMMSS>-<slug>/`. Use the
+user's scratch location if their instructions define one. Otherwise:
+
+| OS | Scratch root | Before creating or removing anything there |
+| --- | --- | --- |
+| Windows | `%TEMP%\agent-skills\scratch\` | `%TEMP%` is absolute and inside `%USERPROFILE%`; no component from `%USERPROFILE%` down to the clone is a junction or symlink |
+| macOS, Linux | `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/` | the base is absolute and either owned by you and not group- or other-writable, or sticky and owned by you or `root`; `agent-skills-<uid>` is owned by you with mode `0700`; no component below the base is a symlink |
+
+In both cases the resolved clone path must sit inside the scratch root. If a check fails,
+stop and report it.
+
+Reuse the clone for later review rounds. If it must outlive seven days, or the user asks to
+keep it, create an empty `KEEP` file in it so stale-scratch sweeps skip it, and remove the
+file when retention ends. When the review loop ends, also when it fails, remove the clone
+only after confirming it holds no unique work: no working-tree edits, untracked files,
+stashes, or unpushed commits (`git log HEAD --branches --not --remotes`). After a `--fix`
+run, move the fixes to the intended checkout first. If any check finds unique work or
+cannot run, keep the clone (with `KEEP`) and report its path.
 
 ## Fixing: `--fix`
 
