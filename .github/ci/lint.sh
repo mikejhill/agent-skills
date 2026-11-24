@@ -11,10 +11,11 @@ step() {
 }
 
 # shellcheck disable=SC2329  # called through step
+# core.quotePath=false keeps non-ASCII names raw, so the -f test and shellcheck see real paths.
 shell_files() {
   {
-    git ls-files '*.sh' '*.bash'
-    git ls-files | while IFS= read -r f; do
+    git -c core.quotePath=false ls-files '*.sh' '*.bash'
+    git -c core.quotePath=false ls-files | while IFS= read -r f; do
       [ -f "$f" ] && head -n1 "$f" | grep -qE '^#!.*\b(ba|da|k)?sh\b' && echo "$f"
     done
   } | sort -u
@@ -33,12 +34,22 @@ run_shellcheck() {
 # shellcheck disable=SC2329
 run_yamllint() {
   local files=() f
-  while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.yml' '*.yaml')
+  while IFS= read -r f; do files+=("$f"); done < <(git -c core.quotePath=false ls-files '*.yml' '*.yaml')
   echo "yamllint: ${#files[@]} file(s)"
   [ "${#files[@]}" -eq 0 ] || yamllint --strict "${files[@]}"
 }
 
-step ruff ruff check --output-format="${RUFF_FORMAT:-full}" .
+# Tracked Python files passed explicitly, so Ruff's default excludes (_build, dist, ...) cannot
+# hide a file the language-coverage test counts as covered.
+# shellcheck disable=SC2329
+run_ruff() {
+  local files=() f
+  while IFS= read -r f; do files+=("$f"); done < <(git -c core.quotePath=false ls-files '*.py' '*.pyi' '*.ipynb')
+  echo "ruff: ${#files[@]} file(s)"
+  [ "${#files[@]}" -eq 0 ] || ruff check --output-format="${RUFF_FORMAT:-full}" "${files[@]}"
+}
+
+step ruff run_ruff
 step shellcheck run_shellcheck
 step PSScriptAnalyzer pwsh -NoProfile -File .github/ci/psscriptanalyzer.ps1
 step yamllint run_yamllint

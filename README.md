@@ -55,6 +55,7 @@ Without SkillSinc, copy a skill folder into your harness's skills directory (for
 | Code lint | Python (ruff), shell (shellcheck), PowerShell (PSScriptAnalyzer), YAML (yamllint), and workflows (actionlint) |
 | Markdown lint | markdownlint-cli2 with [.markdownlint-cli2.jsonc](.markdownlint-cli2.jsonc) |
 | Tests | Skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
+| Language coverage | Fails when a skill adds a script in a language no job lints or tests (for example Go or TypeScript); add a job for it first |
 | PR title | Conventional Commits |
 
 Run them locally from the repository root (needs Python 3.11+, Node.js, and PowerShell 7):
