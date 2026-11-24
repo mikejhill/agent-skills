@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -148,70 +149,88 @@ def test_tracked_json_parses() -> None:
         json.loads(f.read_text(encoding="utf-8"))
 
 
-# Script languages that a CI job lints or tests. Adding a script in another language
-# fails test_every_script_language_has_ci until a job covers it and its suffix is listed.
+# Script languages that a CI job lints or tests, matching the selectors in .github/ci/lint.sh
+# and psscriptanalyzer.ps1. Adding a script in another language fails
+# test_every_script_language_has_ci until a job covers it and it is listed here.
 COVERED_SUFFIXES = {
     ".py": "ruff + pytest",
     ".sh": "shellcheck", ".bash": "shellcheck",
     ".ps1": "PSScriptAnalyzer", ".psm1": "PSScriptAnalyzer", ".psd1": "PSScriptAnalyzer",
 }
+# lint.sh also sends any file with a sh/bash/dash/ksh shebang to shellcheck.
+COVERED_SHEBANG = re.compile(r"^#!.*\b(ba|da|k)?sh\b")
 # Single files covered by a dedicated check instead of a language-wide job.
 COVERED_FILES = {
     "skills/mermaid-diagrams/scripts/mermaid-export.mjs": "test_mermaid_export_parses",
 }
-CODE_SUFFIXES = {
-    ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx", ".go", ".rs", ".rb", ".java",
-    ".kt", ".kts", ".cs", ".fs", ".lua", ".pl", ".pm", ".php", ".swift", ".c", ".cc", ".cpp",
-    ".h", ".hpp", ".zsh", ".fish", ".bat", ".cmd", ".r", ".jl", ".dart", ".scala", ".groovy",
+# Data and documentation. Any other suffix inside a skill's scripts/ or tests/ counts as
+# code, so an unfamiliar language cannot slip through by having an unlisted extension.
+NON_CODE_SUFFIXES = {
+    ".md", ".txt", ".json", ".jsonc", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".csv", ".tsv",
+    ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".xml",
+    ".mmd", ".gitignore", ".gitattributes", ".lock",
 }
-SHEBANG_SUFFIX = {"python": ".py", "python3": ".py", "bash": ".sh", "sh": ".sh", "dash": ".sh",
-                  "pwsh": ".ps1", "node": ".js", "deno": ".ts", "bun": ".ts", "ruby": ".rb",
-                  "perl": ".pl", "zsh": ".zsh", "lua": ".lua"}
 # Bundled data, not code the library maintains: vendored libraries, templates, examples.
 NOT_SCRIPTS = ("/assets/", "/examples/")
 
 
-def script_suffix(path: Path) -> str | None:
-    """The language suffix of a tracked file, from its name or else its shebang."""
-    suffix = path.suffix.lower()
-    if suffix in COVERED_SUFFIXES or suffix in CODE_SUFFIXES:
-        return suffix
-    if suffix:
-        return None
+def shebang(path: Path) -> str:
     try:
-        first = path.read_bytes()[:200].split(b"\n", 1)[0].decode("utf-8", "replace")
+        with path.open("rb") as f:
+            head = f.read(200)
     except OSError:
+        return ""
+    line = head.split(b"\n", 1)[0].decode("utf-8", "replace")
+    return line if line.startswith("#!") else ""
+
+
+def uncovered_reason(path: Path, rel: str) -> str | None:
+    """Why a tracked file is code that no CI job checks, or None if it is covered or not code."""
+    suffix = path.suffix.lower()
+    if suffix in COVERED_SUFFIXES or rel in COVERED_FILES:
         return None
-    if not first.startswith("#!"):
-        return None
-    words = first[2:].split()
-    if words and words[0].endswith("/env"):
-        words = [w for w in words[1:] if not w.startswith("-")]
-    name = Path(words[0]).name if words else ""
-    return SHEBANG_SUFFIX.get(name, f"#!{name}")
+    line = shebang(path)
+    if line:
+        if COVERED_SHEBANG.match(line):
+            return None
+        return f"shebang {line!r}; no lint job selects it (use a covered extension or add a job)"
+    in_code_dir = "/scripts/" in rel or "/tests/" in rel
+    if in_code_dir and suffix not in NON_CODE_SUFFIXES:
+        return f"{suffix or 'no extension'} in a scripts/ or tests/ folder"
+    return None
 
 
 def test_every_script_language_has_ci() -> None:
     uncovered = []
     for path in tracked("*"):
         rel = path.relative_to(REPO).as_posix()
-        if any(part in f"/{rel}" for part in NOT_SCRIPTS) or rel in COVERED_FILES:
+        if any(part in f"/{rel}" for part in NOT_SCRIPTS):
             continue
-        suffix = script_suffix(path)
-        if suffix and suffix not in COVERED_SUFFIXES:
-            uncovered.append(f"{rel} ({suffix})")
+        reason = uncovered_reason(path, rel)
+        if reason:
+            uncovered.append(f"{rel}: {reason}")
     assert not uncovered, (
-        "These scripts use a language no CI job lints or tests:\n  " + "\n  ".join(uncovered)
+        "These files are code that no CI job lints or tests:\n  " + "\n  ".join(uncovered)
         + "\nAdd a job for the language to .github/workflows/ci.yml, list it under ci-pass, and add"
-        " its suffix to COVERED_SUFFIXES (or one file to COVERED_FILES) in .github/ci/test_scripts.py.")
+        " its suffix to COVERED_SUFFIXES (or one file to COVERED_FILES) in .github/ci/test_scripts.py."
+        " Data files belong in NON_CODE_SUFFIXES.")
 
 
-def test_script_language_guard_flags_new_languages(tmp_path: Path) -> None:
-    (tmp_path / "tool.go").write_text("package main\n", encoding="utf-8")
-    (tmp_path / "run").write_text("#!/usr/bin/env -S deno run\n", encoding="utf-8")
-    (tmp_path / "ok").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    (tmp_path / "notes.md").write_text("# notes\n", encoding="utf-8")
-    assert script_suffix(tmp_path / "tool.go") == ".go"
-    assert script_suffix(tmp_path / "run") == ".ts"
-    assert script_suffix(tmp_path / "ok") == ".py"
-    assert script_suffix(tmp_path / "notes.md") is None
+def test_script_language_guard_classification(tmp_path: Path) -> None:
+    scripts = tmp_path / "skills" / "x" / "scripts"
+    scripts.mkdir(parents=True)
+    cases = {
+        "tool.go": ("package main\n", True),
+        "tool.exs": ("IO.puts 1\n", True),
+        "run": ("#!/usr/bin/env -S deno run\n", True),
+        "pyrun": ("#!/usr/bin/env python3\n", True),   # ruff selects *.py only
+        "psrun": ("#!/usr/bin/env pwsh\n", True),       # PSScriptAnalyzer selects *.ps1 only
+        "kshrun": ("#!/bin/ksh\n", False),             # lint.sh sends it to shellcheck
+        "tool.py": ("print(1)\n", False),
+        "notes.md": ("# notes\n", False),
+    }
+    for name, (text, flagged) in cases.items():
+        path = scripts / name
+        path.write_text(text, encoding="utf-8")
+        rel = path.relative_to(tmp_path).as_posix()
+        assert (uncovered_reason(path, rel) is not None) == flagged, name
