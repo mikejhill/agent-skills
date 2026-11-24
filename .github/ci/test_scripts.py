@@ -146,3 +146,72 @@ def test_tracked_json_parses() -> None:
     assert files, "expected at least one tracked JSON file"
     for f in files:
         json.loads(f.read_text(encoding="utf-8"))
+
+
+# Script languages that a CI job lints or tests. Adding a script in another language
+# fails test_every_script_language_has_ci until a job covers it and its suffix is listed.
+COVERED_SUFFIXES = {
+    ".py": "ruff + pytest",
+    ".sh": "shellcheck", ".bash": "shellcheck",
+    ".ps1": "PSScriptAnalyzer", ".psm1": "PSScriptAnalyzer", ".psd1": "PSScriptAnalyzer",
+}
+# Single files covered by a dedicated check instead of a language-wide job.
+COVERED_FILES = {
+    "skills/mermaid-diagrams/scripts/mermaid-export.mjs": "test_mermaid_export_parses",
+}
+CODE_SUFFIXES = {
+    ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx", ".go", ".rs", ".rb", ".java",
+    ".kt", ".kts", ".cs", ".fs", ".lua", ".pl", ".pm", ".php", ".swift", ".c", ".cc", ".cpp",
+    ".h", ".hpp", ".zsh", ".fish", ".bat", ".cmd", ".r", ".jl", ".dart", ".scala", ".groovy",
+}
+SHEBANG_SUFFIX = {"python": ".py", "python3": ".py", "bash": ".sh", "sh": ".sh", "dash": ".sh",
+                  "pwsh": ".ps1", "node": ".js", "deno": ".ts", "bun": ".ts", "ruby": ".rb",
+                  "perl": ".pl", "zsh": ".zsh", "lua": ".lua"}
+# Bundled data, not code the library maintains: vendored libraries, templates, examples.
+NOT_SCRIPTS = ("/assets/", "/examples/")
+
+
+def script_suffix(path: Path) -> str | None:
+    """The language suffix of a tracked file, from its name or else its shebang."""
+    suffix = path.suffix.lower()
+    if suffix in COVERED_SUFFIXES or suffix in CODE_SUFFIXES:
+        return suffix
+    if suffix:
+        return None
+    try:
+        first = path.read_bytes()[:200].split(b"\n", 1)[0].decode("utf-8", "replace")
+    except OSError:
+        return None
+    if not first.startswith("#!"):
+        return None
+    words = first[2:].split()
+    if words and words[0].endswith("/env"):
+        words = [w for w in words[1:] if not w.startswith("-")]
+    name = Path(words[0]).name if words else ""
+    return SHEBANG_SUFFIX.get(name, f"#!{name}")
+
+
+def test_every_script_language_has_ci() -> None:
+    uncovered = []
+    for path in tracked("*"):
+        rel = path.relative_to(REPO).as_posix()
+        if any(part in f"/{rel}" for part in NOT_SCRIPTS) or rel in COVERED_FILES:
+            continue
+        suffix = script_suffix(path)
+        if suffix and suffix not in COVERED_SUFFIXES:
+            uncovered.append(f"{rel} ({suffix})")
+    assert not uncovered, (
+        "These scripts use a language no CI job lints or tests:\n  " + "\n  ".join(uncovered)
+        + "\nAdd a job for the language to .github/workflows/ci.yml, list it under ci-pass, and add"
+        " its suffix to COVERED_SUFFIXES (or one file to COVERED_FILES) in .github/ci/test_scripts.py.")
+
+
+def test_script_language_guard_flags_new_languages(tmp_path: Path) -> None:
+    (tmp_path / "tool.go").write_text("package main\n", encoding="utf-8")
+    (tmp_path / "run").write_text("#!/usr/bin/env -S deno run\n", encoding="utf-8")
+    (tmp_path / "ok").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("# notes\n", encoding="utf-8")
+    assert script_suffix(tmp_path / "tool.go") == ".go"
+    assert script_suffix(tmp_path / "run") == ".ts"
+    assert script_suffix(tmp_path / "ok") == ".py"
+    assert script_suffix(tmp_path / "notes.md") is None
