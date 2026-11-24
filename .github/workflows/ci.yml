@@ -24,7 +24,7 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@v25
 
   skills:
-    name: Skill format (skills-ref + skill-development)
+    name: Skill format (skills-ref + agent-context)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,8 +37,8 @@ jobs:
       - run: pip install -r .github/ci/requirements.txt
       - name: skills-ref validate
         run: python .github/ci/skills_ref_check.py
-      - name: skill-development checker
-        run: python skills/skill-development/scripts/check_skill.py skills
+      - name: agent-context checker
+        run: python skills/agent-context/scripts/check_skill.py skills
 
   lint:
     name: Code lint (ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint)

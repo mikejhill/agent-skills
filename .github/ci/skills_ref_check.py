@@ -5,7 +5,7 @@ Usage:
     python .github/ci/skills_ref_check.py [skills-root]
 
 skills-ref allows only the spec frontmatter keys. This library also uses the
-harness extension keys that skills/skill-development documents and checks
+harness extension keys that skills/agent-context documents and checks
 (EXTENSION_KEYS in check_skill.py), so those keys are removed before
 validation. Every other skills-ref rule applies unchanged. Exits 1 on any
 error, including a folder under the skills root with no SKILL.md.
@@ -21,7 +21,7 @@ from skills_ref.parser import parse_frontmatter
 from skills_ref.validator import validate_metadata
 
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "skills" / "skill-development" / "scripts"))
+sys.path.insert(0, str(REPO / "skills" / "agent-context" / "scripts"))
 from check_skill import EXTENSION_KEYS  # noqa: E402
 
 

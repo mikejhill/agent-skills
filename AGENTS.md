@@ -6,12 +6,11 @@ This repository is a feature library for other workspaces, not a project workspa
 
 | Feature type       | Location                   | File pattern                      |
 | ------------------ | -------------------------- | --------------------------------- |
-| Skills             | `skills/<name>/`           | `SKILL.md`, `README.md`, `INTENT.md` (see `skill-development`) |
+| Skills             | `skills/<name>/`           | `SKILL.md`, `README.md`, `INTENT.md` (see `agent-context`) |
 | Instructions       | `instructions/`            | `<name>.instructions.md`          |
 | Agents             | `agents/`                  | `<name>.agent.md`                 |
 | Prompts            | `prompts/`                 | `<name>.prompt.md`                |
-| Resources          | `resources/`               | `<name>.md`                       |
-| Intent files       | Alongside the feature      | `INTENT.md` ([format](resources/intent-files.md)) |
+| Intent files       | Alongside the feature      | `INTENT.md` or `<name>.intent.md` (see `agent-context`) |
 
 ## Rules
 
