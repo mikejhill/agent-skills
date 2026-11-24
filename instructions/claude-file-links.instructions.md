@@ -8,6 +8,6 @@ applyTo: "**"
 
 When Claude references a file in a reply, plan, review, or summary:
 
-- Make the reference a clickable link to the file, not bare text.
-- Use the link form the current surface renders (for example, a Markdown link with a relative path, or `path:line`).
+- Make the reference a clickable link to the file. Never put a file reference only in inline code (backticks); the user cannot open it from there.
+- Use a Markdown link with a relative path, or a bare `path:line` reference that the terminal turns into a hyperlink.
 - Include the line number when pointing at specific code.
