@@ -11,10 +11,11 @@ step() {
 }
 
 # shellcheck disable=SC2329  # called through step
+# core.quotePath=false keeps non-ASCII names raw, so the -f test and shellcheck see real paths.
 shell_files() {
   {
-    git ls-files '*.sh' '*.bash'
-    git ls-files | while IFS= read -r f; do
+    git -c core.quotePath=false ls-files '*.sh' '*.bash'
+    git -c core.quotePath=false ls-files | while IFS= read -r f; do
       [ -f "$f" ] && head -n1 "$f" | grep -qE '^#!.*\b(ba|da|k)?sh\b' && echo "$f"
     done
   } | sort -u
@@ -33,7 +34,7 @@ run_shellcheck() {
 # shellcheck disable=SC2329
 run_yamllint() {
   local files=() f
-  while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.yml' '*.yaml')
+  while IFS= read -r f; do files+=("$f"); done < <(git -c core.quotePath=false ls-files '*.yml' '*.yaml')
   echo "yamllint: ${#files[@]} file(s)"
   [ "${#files[@]}" -eq 0 ] || yamllint --strict "${files[@]}"
 }

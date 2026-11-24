@@ -165,27 +165,33 @@ COVERED_SHEBANG = re.compile(r"^#!.*\b(ba|da|k)?sh\b")
 COVERED_FILES = {
     "skills/mermaid-diagrams/scripts/mermaid-export.mjs": "test_mermaid_export_parses",
 }
-# Source-code suffixes flagged wherever they appear (compared lowercased), since a script
-# run as `deno run x.ts` or `go run x.go` needs no shebang and may live in any folder.
+# Outside skills/, source-code suffixes are flagged wherever they appear (compared
+# lowercased), since a script run as `deno run x.ts` needs no shebang. Inside a skill every
+# file must be covered or known data, so an unlisted language cannot slip through.
 SOURCE_SUFFIXES = {
     ".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".go", ".rs", ".rb", ".pl",
-    ".pm", ".php", ".lua", ".java", ".kt", ".kts", ".scala", ".groovy", ".cs", ".fs", ".vb",
-    ".vbs", ".swift", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".r", ".jl", ".ex", ".exs",
-    ".erl", ".dart", ".zig", ".nim", ".clj", ".hs", ".ml", ".tcl", ".awk", ".zsh", ".fish",
-    ".nu", ".bat", ".cmd", ".py", ".pyi", ".ipynb", ".sh", ".bash", ".ps1", ".psm1", ".psd1",
+    ".pm", ".php", ".lua", ".java", ".kt", ".kts", ".scala", ".groovy", ".cs", ".csx", ".fs",
+    ".fsx", ".vb", ".vbs", ".swift", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".r", ".jl",
+    ".ex", ".exs", ".erl", ".dart", ".zig", ".nim", ".clj", ".hs", ".ml", ".tcl", ".awk",
+    ".zsh", ".fish", ".nu", ".bat", ".cmd", ".py", ".pyi", ".ipynb", ".sh", ".bash", ".ps1",
+    ".psm1", ".psd1",
 }
-# Data and documentation (compared lowercased). Any other suffix inside a skill's scripts/ or
-# tests/ counts as code, so an unfamiliar language cannot slip through by having an unlisted
-# extension.
+# Data and documentation (compared lowercased).
 NON_CODE_SUFFIXES = {
     ".md", ".txt", ".json", ".jsonc", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".csv", ".tsv",
     ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".xml",
     ".mmd", ".lock",
 }
 # Data files matched by whole name, since Path(".gitignore").suffix is empty.
-NON_CODE_NAMES = {".gitignore", ".gitattributes", ".gitkeep", ".editorconfig"}
-# Bundled data, not code the library maintains: vendored libraries, templates, examples.
-NOT_SCRIPTS = ("/assets/", "/examples/")
+NON_CODE_NAMES = {".gitignore", ".gitattributes", ".gitkeep", ".editorconfig", "LICENSE", "NOTICE"}
+# Bundled data folders directly under skills/<name>/, not code the library maintains:
+# vendored libraries, templates, examples.
+DATA_FOLDERS = {"assets", "examples"}
+
+
+def in_data_folder(rel: str) -> bool:
+    parts = rel.split("/")
+    return len(parts) > 3 and parts[0] == "skills" and parts[2] in DATA_FOLDERS
 
 
 def shebang(path: Path) -> str:
@@ -198,9 +204,23 @@ def shebang(path: Path) -> str:
     return line if line.startswith("#!") else ""
 
 
+def notebook_language(path: Path) -> str:
+    """The notebook's language as Ruff reads it; Ruff skips notebooks that are not Python."""
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8")).get("metadata", {})
+    except (OSError, ValueError, AttributeError):
+        return "unreadable"
+    return str(meta.get("language_info", {}).get("name", "python")).lower()
+
+
 def uncovered_reason(path: Path, rel: str) -> str | None:
     """Why a tracked file is code that no CI job checks, or None if it is covered or not code."""
-    if path.suffix in COVERED_SUFFIXES or rel in COVERED_FILES:
+    if rel in COVERED_FILES:
+        return None
+    if path.suffix == ".ipynb":
+        lang = notebook_language(path)
+        return None if lang == "python" else f"{lang} notebook; Ruff checks Python notebooks only"
+    if path.suffix in COVERED_SUFFIXES:
         return None
     line = shebang(path)
     if line:
@@ -208,12 +228,12 @@ def uncovered_reason(path: Path, rel: str) -> str | None:
             return None
         return f"shebang {line!r}; no lint job selects it (use a covered extension or add a job)"
     suffix = path.suffix.lower()
-    if suffix in SOURCE_SUFFIXES:
-        return f"{path.suffix} source file; no lint job selects this suffix"
     if path.name in NON_CODE_NAMES or suffix in NON_CODE_SUFFIXES:
         return None
-    if "/scripts/" in rel or "/tests/" in rel:
-        return f"{path.suffix or 'no extension'} in a scripts/ or tests/ folder"
+    if rel.startswith("skills/"):
+        return f"{path.suffix or 'no extension'}: not a covered language or a known data type"
+    if suffix in SOURCE_SUFFIXES:
+        return f"{path.suffix} source file; no lint job selects this suffix"
     return None
 
 
@@ -221,7 +241,7 @@ def test_every_script_language_has_ci() -> None:
     uncovered = []
     for path in tracked("*"):
         rel = path.relative_to(REPO).as_posix()
-        if any(part in f"/{rel}" for part in NOT_SCRIPTS):
+        if in_data_folder(rel):
             continue
         reason = uncovered_reason(path, rel)
         if reason:
@@ -247,6 +267,7 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
         "tool.py": ("print(1)\n", False),
         "stubs.pyi": ("x: int\n", False),
         "nb.ipynb": ("{}\n", False),
+        "jl.ipynb": ('{"metadata": {"language_info": {"name": "julia"}}}\n', True),
         ".gitignore": ("*.tmp\n", False),
         "notes.md": ("# notes\n", False),
     }
@@ -255,9 +276,27 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
         path.write_text(text, encoding="utf-8")
         rel = path.relative_to(tmp_path).as_posix()
         assert (uncovered_reason(path, rel) is not None) == flagged, name
-    # Source files are flagged outside scripts/ and tests/ too: `deno run` needs no shebang.
+    # Inside a skill, any unknown file type is flagged in any folder: `dotnet fsi` needs no shebang.
     bin_dir = tmp_path / "skills" / "x" / "bin"
     bin_dir.mkdir()
-    render = bin_dir / "render.ts"
-    render.write_text("console.log(1)\n", encoding="utf-8")
+    render = bin_dir / "render.fsx"
+    render.write_text("printfn \"1\"\n", encoding="utf-8")
     assert uncovered_reason(render, render.relative_to(tmp_path).as_posix()) is not None
+    # Data folders are exempt only directly under a skill, not when the skill is named after one.
+    assert in_data_folder("skills/x/assets/vendor.js")
+    assert in_data_folder("skills/x/examples/demo.ts")
+    assert not in_data_folder("skills/assets/scripts/render.ts")
+    assert not in_data_folder("skills/x/scripts/assets/render.ts")
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="needs bash")
+def test_lint_sh_passes_non_ascii_shell_names(tmp_path: Path) -> None:
+    lint = (REPO / ".github" / "ci" / "lint.sh").read_text(encoding="utf-8")
+    func = lint[lint.index("shell_files() {"):]
+    func = func[:func.index("\n}\n") + 3]
+    (tmp_path / "résumé").write_text("#!/bin/sh\necho 1\n", encoding="utf-8")
+    assert_ok(run("git", "init", "-q", cwd=tmp_path))
+    assert_ok(run("git", "add", "résumé", cwd=tmp_path))
+    proc = run("bash", "-c", func + "shell_files", cwd=tmp_path)
+    assert_ok(proc)
+    assert proc.stdout.splitlines() == ["résumé"]
