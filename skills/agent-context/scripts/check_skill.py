@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check agent skill folders against the skill-development standards.
+"""Check agent skill folders against the agent-context skill standards.
 
 Usage:
     python3 check_skill.py <skill-dir-or-skills-root> [...] [--json]
@@ -433,7 +433,7 @@ def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Check agent skill folders against the skill-development standards.",
+        description="Check agent skill folders against the agent-context skill standards.",
         epilog="example: python3 check_skill.py skills/my-skill",
     )
     ap.add_argument("paths", nargs="+", type=Path, help="skill folder(s) or a folder of skills")

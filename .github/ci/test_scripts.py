@@ -74,7 +74,7 @@ def tracked(pattern: str) -> list[Path]:
 
 
 def test_skills_meet_skill_development_standard() -> None:
-    assert_ok(run(PY, SKILLS / "skill-development" / "scripts" / "check_skill.py", SKILLS))
+    assert_ok(run(PY, SKILLS / "agent-context" / "scripts" / "check_skill.py", SKILLS))
 
 
 @pytest.mark.parametrize("script", [
@@ -82,7 +82,7 @@ def test_skills_meet_skill_development_standard() -> None:
     "cross-harness/scripts/xh.py",
     "efficient-tool-calls/scripts/shell_probe.py",
     "session-handoff/scripts/new_handoff.py",
-    "skill-development/scripts/check_skill.py",
+    "agent-context/scripts/check_skill.py",
 ])
 def test_cli_help(script: str) -> None:
     proc = run(PY, SKILLS / script, "--help")

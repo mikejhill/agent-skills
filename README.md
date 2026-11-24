@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikejhill/agent-skills/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikejhill/agent-skills/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Reusable skills, instructions, agents, prompts, and reference resources for AI coding assistants that follow the open [Agent Skills](https://agentskills.io) format and work across harnesses (Claude Code, Codex, and any other agent that reads `SKILL.md` folders).
+Reusable skills, instructions, agents, and prompts for AI coding assistants that follow the open [Agent Skills](https://agentskills.io) format and work across harnesses (Claude Code, Codex, and any other agent that reads `SKILL.md` folders).
 
 The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: SkillSinc converts and distributes each item into every configured harness.
 
@@ -11,11 +11,10 @@ The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: Ski
 
 | Directory       | Contents                                                     |
 | --------------- | ------------------------------------------------------------ |
-| `skills/`       | One folder per skill: `SKILL.md`, `README.md`, `INTENT.md`, and optional `references/`, `scripts/`, `assets/` (standards: `skills/skill-development`) |
+| `skills/`       | One folder per skill: `SKILL.md`, `README.md`, `INTENT.md`, and optional `references/`, `scripts/`, `assets/` (standards: `skills/agent-context`) |
 | `instructions/` | Always-on or scoped instruction files (`<name>.instructions.md`) |
 | `agents/`       | Custom agent definitions (`<name>.agent.md`)                 |
 | `prompts/`      | Explicit, repeatable prompt files (`<name>.prompt.md`)       |
-| `resources/`    | Reference guides loaded by other items                       |
 
 ## Usage
 
@@ -51,7 +50,7 @@ Without SkillSinc, copy a skill folder into your harness's skills directory (for
 
 | Job | What it checks |
 | --- | --- |
-| Skill format | Every skill against the [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) reference validator and the `skill-development` checker |
+| Skill format | Every skill against the [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) reference validator and the `agent-context` checker |
 | Code lint | Python (ruff), shell (shellcheck), PowerShell (PSScriptAnalyzer), YAML (yamllint), and workflows (actionlint) |
 | Markdown lint | markdownlint-cli2 with [.markdownlint-cli2.jsonc](.markdownlint-cli2.jsonc) |
 | Tests | Skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
@@ -63,7 +62,7 @@ Run them locally from the repository root (needs Python 3.11+, Node.js, and Powe
 ```bash
 pip install -r .github/ci/requirements.txt -r .github/ci/requirements-test.txt
 python .github/ci/skills_ref_check.py
-python skills/skill-development/scripts/check_skill.py skills
+python skills/agent-context/scripts/check_skill.py skills
 .github/ci/lint.sh   # ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint (same as CI)
 npx markdownlint-cli2
 python -m pytest
