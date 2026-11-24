@@ -26,7 +26,7 @@ applyTo: "**/*.py,**/pyproject.toml"
 ## Rules
 
 - Keep it under about 50 lines, and make every line a rule. Move procedures, examples, and reference material into a skill.
-- Scope with `applyTo` before reaching for `"**"`. A narrow glob keeps the rules out of unrelated work.
+- Scope with `applyTo` before reaching for `"**"`. The glob limits when the rules apply. Harnesses that filter natively also keep them out of unrelated requests, but others bundle every instruction file into one always-on context with an "applies when" note, so a narrow glob does not shrink context there. Keep the file short either way.
 - One subject per file. Split a file that mixes, say, commit conventions and temp paths, so each can be routed or dropped alone.
 - Write rules that hold everywhere the file is installed. Machine-specific paths, account names, and private hosts belong in a private library or the user's own config.
 - A rule for only one harness goes in its own file, named for that harness, and says so in its description. Route it only to that harness with the distribution tool's config.

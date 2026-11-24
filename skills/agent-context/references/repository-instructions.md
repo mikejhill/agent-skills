@@ -29,10 +29,11 @@ Claude Code loads `CLAUDE.md`. Make it a thin pointer so the rules live in one p
 
 - Add lines below the import only for rules that apply to Claude Code alone.
 - Never copy `AGENTS.md` content into it. Two copies drift.
+- For each subfolder `AGENTS.md` whose rules Claude Code must follow, add a `CLAUDE.md` beside it that imports it (`@AGENTS.md`). Claude Code finds nested files only by its own name, so a root import loads only the root rules.
 - The same pattern applies to any harness that reads its own file name: point it at `AGENTS.md`, plus that harness's deltas.
 
 ## Checklist
 
 - [ ] Every line is repository-specific and not inferable from the code or tooling.
 - [ ] Commands run from a fresh clone.
-- [ ] `CLAUDE.md`, if present, imports `AGENTS.md` and holds only Claude-only deltas.
+- [ ] Each `CLAUDE.md` imports the `AGENTS.md` beside it and holds only Claude-only deltas; every subfolder `AGENTS.md` has one.
