@@ -36,4 +36,4 @@ Claude Code loads `CLAUDE.md`. Make it a thin pointer so the rules live in one p
 
 - [ ] Every line is repository-specific and not inferable from the code or tooling.
 - [ ] Commands run from a fresh clone.
-- [ ] Each `CLAUDE.md` imports the `AGENTS.md` beside it and holds only Claude-only deltas; every subfolder `AGENTS.md` has one.
+- [ ] Each `CLAUDE.md` imports the `AGENTS.md` beside it and holds only Claude-only deltas; every subfolder `AGENTS.md` whose rules Claude Code must follow has one.

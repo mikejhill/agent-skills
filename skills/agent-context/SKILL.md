@@ -33,7 +33,7 @@ Pick the narrowest type that fits.
 1. **Choose the type** from the table above and read its reference. Apply only the files and checks that type requires; for example, `AGENTS.md` and `CLAUDE.md` have fixed names and no intent file.
 2. **Intent first**, where the type has an intent file. For a new feature, write it from the user's ask before anything else, keeping their words for goals and requirements. If one already exists, build from it and leave it unedited. For an existing feature, read the intent file first, then append a log entry after changing the feature. If it has none, a review only reports that it is missing; a revision adds one, built from the user's stated asks and the feature's history, with anything inferred marked `[agent]`. See [readme-and-intent.md](references/readme-and-intent.md).
 3. **Name** it ([Naming](#naming)), unless the type has a fixed name.
-4. **Write the body**, then the description last, once the body is settled.
+4. **Write the body**, then the description last (for types that have one), once the body is settled.
 5. **Validate** with the [Checklist](#checklist) and the type's own checks.
 
 ## Naming
@@ -69,7 +69,7 @@ The description is often the only text an agent sees before it decides to load o
 Each feature must stand alone. A user may install it without any of its neighbours.
 
 - Never name another skill, instruction file, or agent as a dependency or a source of rules. Refer to it by capability instead, for example "follow any standards the user has for Python development".
-- Exception: an adapter whose only job is to invoke one specific feature, such as a prompt that runs a named skill, may name it. Say so in its description and intent file.
+- Exception: a prompt or instruction file whose only job is to invoke one specific feature, and which is distributed together with it, may name it. Say so in its description and intent file. Skills never take this exception; a skill must work when installed alone.
 - Cover only the feature's own subject. Do not set rules for adjacent domains, such as code style, testing, or commit conventions, that other features or user instructions may own. State only what this subject needs on top of them.
 - Copy a small piece of shared logic in, rather than linking to a file in another feature's folder.
 - Never contradict another always-on file. If two rules collide, fix the source, not the reader.
@@ -78,8 +78,8 @@ Each feature must stand alone. A user may install it without any of its neighbou
 
 - [ ] The type is the narrowest that fits.
 - [ ] Every line is something a capable agent would otherwise get wrong. Nothing restates a tool, a linter, or another feature's subject.
-- [ ] No other feature is named as a dependency or source of rules, except by an adapter that exists to invoke it.
-- [ ] Description test: five requests, including near-misses, are judged correctly from the description alone.
+- [ ] No other feature is named as a dependency or source of rules, except by a prompt or instruction adapter distributed with its target.
+- [ ] Description test, for types with a description: five requests, including near-misses, are judged correctly from the description alone.
 - [ ] Harness-neutral, or the limit is stated where users see it.
 - [ ] `npx markdownlint-cli2` passes, if the repository uses it.
 - [ ] The intent file, if the type has one, still matches. A new log entry records what changed and why.

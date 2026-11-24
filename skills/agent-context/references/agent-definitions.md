@@ -1,6 +1,6 @@
 # Agent definitions
 
-An agent definition describes a role another agent delegates to. The delegate starts with none of the caller's conversation, so the definition and the caller's brief are all it knows.
+An agent definition describes a role another agent delegates to. Whether the delegate sees the caller's conversation depends on the harness and how it is launched, so write the definition to work from the caller's brief alone, and never rely on isolation to keep information from it.
 
 ## Format
 
