@@ -150,10 +150,12 @@ def test_tracked_json_parses() -> None:
 
 
 # Script languages that a CI job lints or tests, matching the selectors in .github/ci/lint.sh
-# and psscriptanalyzer.ps1. Adding a script in another language fails
-# test_every_script_language_has_ci until a job covers it and it is listed here.
+# and psscriptanalyzer.ps1. Those selectors are case-sensitive Git pathspecs and Ruff globs, so
+# these suffixes match case-sensitively too: helper.PS1 is not analyzed and is not covered.
+# Adding a script in another language fails test_every_script_language_has_ci until a job
+# covers it and it is listed here.
 COVERED_SUFFIXES = {
-    ".py": "ruff + pytest",
+    ".py": "ruff + pytest", ".pyi": "ruff", ".ipynb": "ruff",
     ".sh": "shellcheck", ".bash": "shellcheck",
     ".ps1": "PSScriptAnalyzer", ".psm1": "PSScriptAnalyzer", ".psd1": "PSScriptAnalyzer",
 }
@@ -163,13 +165,25 @@ COVERED_SHEBANG = re.compile(r"^#!.*\b(ba|da|k)?sh\b")
 COVERED_FILES = {
     "skills/mermaid-diagrams/scripts/mermaid-export.mjs": "test_mermaid_export_parses",
 }
-# Data and documentation. Any other suffix inside a skill's scripts/ or tests/ counts as
-# code, so an unfamiliar language cannot slip through by having an unlisted extension.
+# Source-code suffixes flagged wherever they appear (compared lowercased), since a script
+# run as `deno run x.ts` or `go run x.go` needs no shebang and may live in any folder.
+SOURCE_SUFFIXES = {
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".go", ".rs", ".rb", ".pl",
+    ".pm", ".php", ".lua", ".java", ".kt", ".kts", ".scala", ".groovy", ".cs", ".fs", ".vb",
+    ".vbs", ".swift", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".r", ".jl", ".ex", ".exs",
+    ".erl", ".dart", ".zig", ".nim", ".clj", ".hs", ".ml", ".tcl", ".awk", ".zsh", ".fish",
+    ".nu", ".bat", ".cmd", ".py", ".pyi", ".ipynb", ".sh", ".bash", ".ps1", ".psm1", ".psd1",
+}
+# Data and documentation (compared lowercased). Any other suffix inside a skill's scripts/ or
+# tests/ counts as code, so an unfamiliar language cannot slip through by having an unlisted
+# extension.
 NON_CODE_SUFFIXES = {
     ".md", ".txt", ".json", ".jsonc", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".csv", ".tsv",
     ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".xml",
-    ".mmd", ".gitignore", ".gitattributes", ".lock",
+    ".mmd", ".lock",
 }
+# Data files matched by whole name, since Path(".gitignore").suffix is empty.
+NON_CODE_NAMES = {".gitignore", ".gitattributes", ".gitkeep", ".editorconfig"}
 # Bundled data, not code the library maintains: vendored libraries, templates, examples.
 NOT_SCRIPTS = ("/assets/", "/examples/")
 
@@ -186,17 +200,20 @@ def shebang(path: Path) -> str:
 
 def uncovered_reason(path: Path, rel: str) -> str | None:
     """Why a tracked file is code that no CI job checks, or None if it is covered or not code."""
-    suffix = path.suffix.lower()
-    if suffix in COVERED_SUFFIXES or rel in COVERED_FILES:
+    if path.suffix in COVERED_SUFFIXES or rel in COVERED_FILES:
         return None
     line = shebang(path)
     if line:
         if COVERED_SHEBANG.match(line):
             return None
         return f"shebang {line!r}; no lint job selects it (use a covered extension or add a job)"
-    in_code_dir = "/scripts/" in rel or "/tests/" in rel
-    if in_code_dir and suffix not in NON_CODE_SUFFIXES:
-        return f"{suffix or 'no extension'} in a scripts/ or tests/ folder"
+    suffix = path.suffix.lower()
+    if suffix in SOURCE_SUFFIXES:
+        return f"{path.suffix} source file; no lint job selects this suffix"
+    if path.name in NON_CODE_NAMES or suffix in NON_CODE_SUFFIXES:
+        return None
+    if "/scripts/" in rel or "/tests/" in rel:
+        return f"{path.suffix or 'no extension'} in a scripts/ or tests/ folder"
     return None
 
 
@@ -225,8 +242,12 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
         "run": ("#!/usr/bin/env -S deno run\n", True),
         "pyrun": ("#!/usr/bin/env python3\n", True),   # ruff selects *.py only
         "psrun": ("#!/usr/bin/env pwsh\n", True),       # PSScriptAnalyzer selects *.ps1 only
+        "helper.PS1": ("Write-Output 1\n", True),       # pathspec *.ps1 is case-sensitive
         "kshrun": ("#!/bin/ksh\n", False),             # lint.sh sends it to shellcheck
         "tool.py": ("print(1)\n", False),
+        "stubs.pyi": ("x: int\n", False),
+        "nb.ipynb": ("{}\n", False),
+        ".gitignore": ("*.tmp\n", False),
         "notes.md": ("# notes\n", False),
     }
     for name, (text, flagged) in cases.items():
@@ -234,3 +255,9 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
         path.write_text(text, encoding="utf-8")
         rel = path.relative_to(tmp_path).as_posix()
         assert (uncovered_reason(path, rel) is not None) == flagged, name
+    # Source files are flagged outside scripts/ and tests/ too: `deno run` needs no shebang.
+    bin_dir = tmp_path / "skills" / "x" / "bin"
+    bin_dir.mkdir()
+    render = bin_dir / "render.ts"
+    render.write_text("console.log(1)\n", encoding="utf-8")
+    assert uncovered_reason(render, render.relative_to(tmp_path).as_posix()) is not None
