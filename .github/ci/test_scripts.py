@@ -197,10 +197,10 @@ def in_data_folder(rel: str) -> bool:
 def shebang(path: Path) -> str:
     try:
         with path.open("rb") as f:
-            head = f.read(200)
+            head = f.readline(4096)  # lint.sh reads the whole first line
     except OSError:
         return ""
-    line = head.split(b"\n", 1)[0].decode("utf-8", "replace")
+    line = head.rstrip(b"\r\n").decode("utf-8", "replace")
     return line if line.startswith("#!") else ""
 
 
@@ -210,7 +210,8 @@ def notebook_language(path: Path) -> str:
         meta = json.loads(path.read_text(encoding="utf-8")).get("metadata", {})
     except (OSError, ValueError, AttributeError):
         return "unreadable"
-    return str(meta.get("language_info", {}).get("name", "python")).lower()
+    lang = (meta.get("language_info") or {}).get("name") or (meta.get("kernelspec") or {}).get("language")
+    return str(lang or "python").lower()
 
 
 def uncovered_reason(path: Path, rel: str) -> str | None:
@@ -268,6 +269,8 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
         "stubs.pyi": ("x: int\n", False),
         "nb.ipynb": ("{}\n", False),
         "jl.ipynb": ('{"metadata": {"language_info": {"name": "julia"}}}\n', True),
+        "jlk.ipynb": ('{"metadata": {"kernelspec": {"language": "Julia"}}}\n', True),
+        "longbang": ("#!/" + "x" * 300 + "/bash\n", False),
         ".gitignore": ("*.tmp\n", False),
         "notes.md": ("# notes\n", False),
     }

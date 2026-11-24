@@ -39,7 +39,17 @@ run_yamllint() {
   [ "${#files[@]}" -eq 0 ] || yamllint --strict "${files[@]}"
 }
 
-step ruff ruff check --output-format="${RUFF_FORMAT:-full}" .
+# Tracked Python files passed explicitly, so Ruff's default excludes (_build, dist, ...) cannot
+# hide a file the language-coverage test counts as covered.
+# shellcheck disable=SC2329
+run_ruff() {
+  local files=() f
+  while IFS= read -r f; do files+=("$f"); done < <(git -c core.quotePath=false ls-files '*.py' '*.pyi' '*.ipynb')
+  echo "ruff: ${#files[@]} file(s)"
+  [ "${#files[@]}" -eq 0 ] || ruff check --output-format="${RUFF_FORMAT:-full}" "${files[@]}"
+}
+
+step ruff run_ruff
 step shellcheck run_shellcheck
 step PSScriptAnalyzer pwsh -NoProfile -File .github/ci/psscriptanalyzer.ps1
 step yamllint run_yamllint
