@@ -324,6 +324,41 @@ class CheckPluginTest(unittest.TestCase):
         self.assertIn("'owner.name' is required", self.errors())
         self.assertTrue(any("Copilot loads one catalog" in m for m in self.warnings()))
 
+    def test_round4_fixes(self) -> None:
+        portable = self.root / "portable"
+        write(portable, {"plugin.json": {"$schema": SCHEMA, "name": "portable"},
+                         "mcp.json": {"$schema": MCP, "mcpServers": {
+                             "sp": {"type": "streamable-http", "url": "https://example com/mcp"}}}})
+        write(self.root / "withskill", {"plugin.json": {"$schema": SCHEMA, "name": "withskill"},
+                                        "skills/Bad_Name/SKILL.md": "---\nname: Bad_Name\ndescription: []\n---\n"})
+        write(self.root, {".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+            {"name": "portable", "source": "./portable"},
+            {"name": "withskill", "source": "./withskill"},
+            {"name": "remote", "source": {"source": "github", "repo": "o/r"}, "hooks": "./hooks.json"}]}})
+        errors = "\n".join(self.errors())
+        for text in ("Claude Code finds no plugin it can load", "accepts only inline hooks",
+                     "url must not contain whitespace", "Agent Skills names are",
+                     "'description' is required by Agent Skills and must be a string"):
+            self.assertIn(text, errors)
+
+    def test_standalone_openplugin_and_codex_compat(self) -> None:
+        legacy = self.root / "legacy"
+        write(legacy, {".plugin/plugin.json": {"name": "legacy", "agents": "./custom"}})
+        self.assertTrue(any("'./custom': not found" in m for m in self.errors(legacy)))
+        codex = self.root / "codex"
+        write(codex, {".codex-plugin/plugin.json": {"name": "c", "skills": "./custom-skills", "apps": {},
+                                                    "onboardingSkill": []}})
+        errors = "\n".join(self.errors(codex))
+        for text in ("'./custom-skills': not found", "apps must be a path string", "onboardingSkill must be a path string"):
+            self.assertIn(text, errors)
+
+    def test_name_with_trailing_newline(self) -> None:
+        write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "notes\n"},
+                          ".claude-plugin/plugin.json": {"name": "notes\n"}})
+        errors = "\n".join(self.errors())
+        self.assertIn("1-64 of a-z", errors)
+        self.assertIn("requires kebab-case", errors)
+
     def test_empty_folder_and_cli(self) -> None:
         self.assertTrue(any("no plugin manifest" in m for m in self.errors()))
         write(self.root, good_plugin())

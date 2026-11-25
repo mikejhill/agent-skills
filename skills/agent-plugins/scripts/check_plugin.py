@@ -105,7 +105,9 @@ def frontmatter_scalar(front: str, key: str) -> str | None:
             value = rest[1:end] if end != -1 else rest[1:]
             return value.replace("''", "'") if q == "'" else value
         value = re.split(r"[ \t]#", rest, maxsplit=1)[0].strip()
-        return None if value in ("~", "null", "Null", "NULL") else value
+        if value[:1] in ("[", "{") or value in ("~", "null", "Null", "NULL"):
+            return None  # a collection or null, not a string
+        return value
     return None
 
 
@@ -288,6 +290,8 @@ class Checker:
                     self.warn(codex_manifest, "ignored: plugin.json already has extensions['com.openai']")
                 else:
                     self.check_codex_paths(d, codex_manifest, data, "")
+                    for key in sorted((COMPONENT_KEYS - {"hooks"}) & set(data)):
+                        self.check_path_values(d, data[key], codex_manifest, key)
                     inner = data.get("extensions")
                     if isinstance(inner, dict) and isinstance(inner.get("com.openai"), dict):
                         self.check_codex_paths(d, codex_manifest, inner["com.openai"], "extensions.com.openai.")
@@ -348,7 +352,7 @@ class Checker:
         name = data.get("name")
         if not isinstance(name, str):
             self.error(path, "'name' is required and must be a string")
-        elif not NAME_10.match(name) or "--" in name or ".." in name:
+        elif not NAME_10.fullmatch(name) or "--" in name or ".." in name:
             self.error(path, f"name {name!r}: 1-64 of a-z 0-9 - . , alphanumeric at both ends, no '--' or '..'")
         for key in ("version", "description", "homepage", "repository", "license"):
             if key in data and not isinstance(data[key], str):
@@ -381,8 +385,12 @@ class Checker:
 
     def check_codex_paths(self, d: Path, path: Path, data: dict, prefix: str) -> None:
         for key in CODEX_PATH_KEYS:
-            if key in data:
-                self.check_path_values(d, data[key], path, f"{prefix}{key}")
+            if key not in data:
+                continue
+            if key != "hooks" and not isinstance(data[key], str):
+                self.error(path, f"{prefix}{key} must be a path string")
+                continue
+            self.check_path_values(d, data[key], path, f"{prefix}{key}")
 
     def check_manifest_legacy(self, d: Path, path: Path, data: dict) -> None:
         if not isinstance(data.get("name"), str):
@@ -459,6 +467,9 @@ class Checker:
         if not isinstance(url, str):
             self.error(path, f"{where}.url is required")
         else:
+            if re.search(r"[\s\x00-\x1f\x7f]", url):
+                self.error(path, f"{where}.url must not contain whitespace or control characters")
+                return
             try:
                 parts = urlsplit(url)
                 host = parts.hostname
@@ -492,7 +503,7 @@ class Checker:
         if not isinstance(name, str):
             self.error(path, "'name' is required")
         else:
-            if not NAME_KEBAB.match(name):
+            if not NAME_KEBAB.fullmatch(name):
                 self.error(path, f"name {name!r}: Claude Code requires kebab-case")
             if name in CLAUDE_RESERVED_NAMES or name.startswith(CLAUDE_RESERVED_PREFIXES):
                 self.error(path, f"name {name!r} is reserved by Claude Code")
@@ -500,7 +511,7 @@ class Checker:
             self.warn(path, "the Agent Plugins $schema belongs in the root plugin.json, not here")
         self.check_claude_components(d, path, data, "")
 
-    def check_claude_components(self, d: Path, path: Path, data: dict, prefix: str) -> None:
+    def check_claude_components(self, d: Path | None, path: Path, data: dict, prefix: str) -> None:
         entry = bool(prefix)
         for key in sorted(COMPONENT_KEYS & set(data)):
             raw = data[key]
@@ -522,6 +533,8 @@ class Checker:
                 if key == "skills" and value in (".", "./"):
                     continue
                 if key == "mcpServers" and value.startswith("https://"):
+                    continue
+                if d is None:
                     continue
                 target = self.check_rel_path(d, value, path, f"{prefix}{key}")
                 if key == "mcpServers" and target is not None and target.name == "mcp.json":
@@ -556,8 +569,10 @@ class Checker:
                     self.error(skill_md, "frontmatter 'name' is required by Agent Skills; portable clients skip it")
             elif name != child.name:
                 report(skill_md, f"name {name!r} must equal the folder name {child.name!r}")
+            elif portable and (len(name) > 64 or not NAME_KEBAB.fullmatch(name)):
+                self.error(skill_md, f"name {name!r}: Agent Skills names are 1-64 of a-z, 0-9, and single hyphens")
             if not desc:
-                report(skill_md, "frontmatter 'description' is required by Agent Skills")
+                report(skill_md, "frontmatter 'description' is required by Agent Skills and must be a string")
 
     # -- catalogs ----------------------------------------------------------
     def check_catalogs(self) -> None:
@@ -622,12 +637,21 @@ class Checker:
             if kind == "codex":
                 self.check_codex_entry(path, where, entry)
             local = self.local_source(kind, path, where, entry.get("source"), plugin_root)
+            if kind == "claude":
+                self.check_claude_components(local, path, entry, f"{where}.")
             if local is None:
                 continue
             supplies = kind == "claude" and bool((COMPONENT_KEYS | {"themes"}) & set(entry))
             info = self.check_plugin(local, entry_components=supplies)
             if info.get("name") and info["name"] != ename:
                 self.error(path, f"{where}: entry name differs from the plugin manifest name {info['name']!r}")
+            if not self.loadable(kind, local, supplies):
+                harness = "Claude Code" if kind == "claude" else "this harness"
+                self.error(path, f"{where}: {harness} finds no plugin it can load at this source")
+            elif kind == "claude" and (local / "mcp.json").is_file() and not (local / ".mcp.json").exists() \
+                    and not (local / ".claude-plugin" / "plugin.json").is_file() and "mcpServers" not in entry:
+                self.warn(path, f"{where}: Claude Code does not read the Agent Plugins mcp.json; add .mcp.json or "
+                                "mcpServers in .claude-plugin/plugin.json")
             if kind == "claude":
                 self.check_claude_entry(path, where, entry, local)
         return entries
@@ -683,7 +707,14 @@ class Checker:
             if has_version:
                 self.warn(path, f"{where}: version is set in both the entry and the plugin manifest; "
                                 "the manifest wins. Set it in one place")
-        self.check_claude_components(local, path, entry, f"{where}.")
+
+    def loadable(self, kind: str, d: Path, supplies: bool) -> bool:
+        claude = supplies or (d / ".claude-plugin" / "plugin.json").is_file() or \
+            any((d / p).exists() for p in CLAUDE_LAYOUT)
+        if kind == "claude":
+            return claude
+        return claude or any((d / p).is_file() for p in ("plugin.json", ".plugin/plugin.json",
+                                                          ".codex-plugin/plugin.json"))
 
     def check_codex_entry(self, path: Path, where: str, entry: dict) -> None:
         policy = entry.get("policy")
@@ -700,7 +731,8 @@ class Checker:
     # -- entry point -------------------------------------------------------
     def run(self) -> list[dict[str, str]]:
         is_plugin = any((self.root / p).is_file() for p in
-                        ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"))
+                        ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
+                         ".plugin/plugin.json"))
         has_catalog = any((self.root / p).is_file() for p in CATALOGS.values())
         has_layout = any((self.root / p).exists() for p in CLAUDE_LAYOUT)
         if is_plugin or (not has_catalog and has_layout):
