@@ -12,7 +12,7 @@
 Choose by lifetime and audience:
 
 - **Workspace scratch** holds intermediate results, logs, and checkpoints for work in one project. Ensure `.tmp/` is gitignored before writing there.
-- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. If the user's instructions name a home for generated documents or reports, use that instead. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
+- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. If the user's instructions name a home for generated documents or reports, use it, with its own naming and update rules, instead. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
 - **Config** honors `XDG_CONFIG_HOME` on every OS. It holds settings and credentials the user creates. Scripts read it. Agents never write credentials. See [cli.md](cli.md).
 - **Cache and state** holds data a script can rebuild, such as probe results, broker state, or downloads.
 
@@ -43,6 +43,8 @@ def user_cache(skill: str) -> Path:
 ```
 
 ## File names
+
+These names and the rules below are defaults for locations that have no naming rules of their own.
 
 `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>`
 

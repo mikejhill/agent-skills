@@ -69,7 +69,7 @@ Keep in `SKILL.md` only what every run needs, and aim for 200 lines or fewer (th
 | User configuration | `~/.config/agent-skills/<skill-name>/` |
 | Cache and persistent state | `<user-cache>/agent-skills/<skill-name>/` |
 
-Name ephemeral files `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` using local time, for example `report-20261122-175433-auth-flow.md`. Create them exclusively and never overwrite. Never write inside the skill folder at run time. For per-OS resolution and creation rules, read [paths.md](paths.md).
+Name ephemeral files `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` using local time, for example `report-20261122-175433-auth-flow.md`. Create them exclusively and never overwrite. A destination with its own naming or update rules, such as a user-defined home for generated documents, overrides these. Never write inside the skill folder at run time. For per-OS resolution and creation rules, read [paths.md](paths.md).
 
 ## Scripts
 

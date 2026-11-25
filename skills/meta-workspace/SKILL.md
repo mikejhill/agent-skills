@@ -19,7 +19,7 @@ Treat everything here as transient working material. It is dated so the user can
 2. A clearly more appropriate home, such as a project's own docs, code, or tests when the content ships with that project.
 3. Otherwise `_meta/`, even when the content concerns only one project.
 
-If the projects root is unclear, use the parent folder of the current project when it holds other projects; otherwise ask once. If it is not reachable from this session, put the file where the session can deliver it and tell the user.
+The projects root is the parent of the current project's main checkout. For a linked worktree, resolve the main checkout first; never put `_meta/` beside worktrees. If the root is still unclear, ask once. If it is not reachable from this session, put the file where the session can deliver it and tell the user.
 
 ## Structure
 
@@ -35,7 +35,7 @@ If the projects root is unclear, use the parent folder of the current project wh
 ```
 
 - Pick the folder by what the content is, not which project it concerns. A finished write-up is a report; working thoughts toward it are notes; a script that produced it is a script; its raw data is files.
-- If `_meta/` or a folder is missing, create it. Create `README.md` with the table above if it is missing.
+- If `_meta/` or a folder is missing, create it. Create `README.md` with the table above if it is missing. If it exists, add rows for any missing standard folders and keep existing rows and descriptions.
 - Conform to these folders. Add another top-level folder only when content recurs that clearly fits none of them, and add it to the `README.md` table with a one-line purpose.
 
 ## Naming
@@ -49,7 +49,7 @@ Every file and folder you add under the top-level folders is named `YYYY-MM-DD-<
 
 ## Subfolders
 
-Use a subfolder inside a top-level folder when a piece of work has several files, such as a report with its data and charts, or a spec with diagrams. Name the subfolder and every file in it with the same convention, and keep nesting shallow.
+Use a subfolder inside a top-level folder when a piece of work has several files, such as a report with its data and charts, or a spec with diagrams. Name the subfolder and every file in it with the same convention, and keep nesting shallow. Keep exact names a tool requires, such as `pyproject.toml` or `package.json`, inside a dated folder.
 
 ```text
 reports/2026-11-25-dependency-audit/
