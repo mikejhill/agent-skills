@@ -361,6 +361,19 @@ def _():
     arts2 = job(jid2)["artifacts"]
     assert len(arts2) == 1 and Path(arts2[0]).name not in [Path(x).name for x in arts], arts2
     assert xh.generated_dir({"target": "codex"}, "../x") is None  # session ids never become paths
+    if not IS_WIN:  # links inside the outputs folder are never listed or followed
+        link_dir = TMP / "linked"
+        link_dir.mkdir()
+        (link_dir / "f.txt").write_text("x")
+        (TMP / "scan").mkdir()
+        os.symlink(link_dir, TMP / "scan" / "l")
+        assert xh.snapshot(TMP / "scan") == ({}, False)
+    saved = xh.MAX_SCAN
+    xh.MAX_SCAN = 2  # gen holds two images
+    try:
+        assert xh.snapshot(gen)[1] is False and xh.snapshot(gen.parent.parent)[1] is True
+    finally:
+        xh.MAX_SCAN = saved
 
 
 @case("an image-only answer succeeds; copies never replace existing files")
@@ -403,11 +416,12 @@ def _():
     jid2 = start("task", "-t", "codex", "--write", "--resume", jid, "--out", str(out), "again")
     run("wait", jid2, "--timeout", "30", check=0)
     a = job(jid2)["argv"]
-    assert "sandbox_workspace_write.writable_roots=[" + xh.toml_str(str(out.resolve())) + "]" in a, a
+    i = a.index("resume")
+    assert a[i - 2:i] == ["--add-dir", str(out.resolve())] and not any("writable_roots" in x for x in a), a
     jid = start("task", "-t", "codex", "--sandbox", "inherit", "--out", str(out), "x")
     run("wait", jid, "--timeout", "30", check=0)
     assert "--add-dir" not in job(jid)["argv"]  # inherit: the user's sandbox config stays as is
-    assert xh.toml_str('C:\\a "b"\U0001F600') == '"C:\\\\a \\"b\\"\U0001F600"'
+    assert "Save every file" in prompts("codex")[-1]["prompt"]  # inherit: the user's config decides
 
 
 @case("codex attachments with a comma in the path are listed, not passed to -i")

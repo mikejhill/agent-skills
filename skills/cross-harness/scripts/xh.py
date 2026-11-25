@@ -517,11 +517,9 @@ def build_command(job: dict, step: str, prompt, out_path: Path) -> tuple:
                      else ["--base", job["base"]] if job.get("base") else ["--uncommitted"])
             return argv + ["exec", "review"] + scope + cfg_sb + common + job.get("native_args", []) + extra, None
         if resume:
-            # `exec resume` has no --add-dir; the config key replaces configured roots
-            # for this run only.
-            roots = ["-c", "sandbox_workspace_write.writable_roots=[" + toml_str(job["out_dir"]) + "]"] \
-                if add_out else []
-            return argv + ["exec", "resume", resume] + cfg_sb + roots + common + extra + stdin_arg, prompt
+            # `exec resume` has no --add-dir of its own; the parent `exec` takes it.
+            roots = ["--add-dir", job["out_dir"]] if add_out else []
+            return argv + ["exec"] + roots + ["resume", resume] + cfg_sb + common + extra + stdin_arg, prompt
         sb = [] if sandbox == "inherit" else ["-s", sandbox]
         roots = ["--add-dir", job["out_dir"]] if add_out else []
         return argv + ["exec"] + sb + roots + common + extra + stdin_arg, prompt
@@ -559,20 +557,6 @@ def build_command(job: dict, step: str, prompt, out_path: Path) -> tuple:
     elif allow:
         args += ["--allowedTools", ",".join(allow)]
     return argv + args + extra, prompt
-
-
-def toml_str(value: str) -> str:
-    """A TOML basic string. Non-ASCII stays literal (TOML is UTF-8), so paths outside
-    the BMP don't become JSON-style surrogate escapes, which TOML rejects."""
-    out = []
-    for ch in value:
-        if ch in '"\\':
-            out.append("\\" + ch)
-        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
-            out.append(f"\\u{ord(ch):04X}")
-        else:
-            out.append(ch)
-    return '"' + "".join(out) + '"'
 
 
 def claude_native_prompt(job: dict) -> str:
@@ -808,7 +792,7 @@ def media_preamble(target: str, attachments: list, out_dir, sandbox: str) -> str
             note = " (image, already attached to this message)" if target == "codex" and codex_image(f) else ""
             lines.append(f"- {f}{note}")
     if out_dir:
-        if sandbox != "workspace-write":
+        if sandbox == "read-only":
             lines.append("This run cannot write files." + (
                 " Images you create with your image-generation tool are collected automatically; "
                 "do not copy them." if target == "codex" else ""))
@@ -831,32 +815,53 @@ def resolve_attachments(paths) -> list:
     return out
 
 
-MAX_SCAN = 5000  # files examined in the outputs folder; bounds the work after a run
+MAX_SCAN = 5000  # entries examined per folder scan; bounds the work after a run
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: links and junctions on Windows
 
 
-def snapshot(folder: Path, check=None) -> dict:
-    """{path: (size, mtime_ns)} of the regular files under folder, never following links."""
-    seen = {}
-    if not folder.is_dir() or folder.is_symlink():
-        return seen
-    stack = [folder]
-    while stack and len(seen) < MAX_SCAN:
+def plain(st, kind) -> bool:
+    """A regular file or folder (kind = stat.S_ISREG / S_ISDIR) that is no link or junction."""
+    return kind(st.st_mode) and not getattr(st, "st_file_attributes", 0) & REPARSE
+
+
+def snapshot(folder, check=None) -> tuple:
+    """({path: (size, mtime_ns)} of the plain files under folder, truncated?). Never
+    follows links or junctions."""
+    seen, count = {}, 0
+    try:
+        if folder is None or not plain(os.lstat(folder), stat.S_ISDIR):
+            return seen, False
+    except OSError:
+        return seen, False
+    stack = [Path(folder)]
+    while stack:
         try:
             entries = list(os.scandir(stack.pop()))
         except OSError:
             continue
         for e in entries:
-            if check and len(seen) % 200 == 0:
+            count += 1
+            if count > MAX_SCAN:
+                return seen, True
+            if check and count % 200 == 0:
                 check()
             try:
-                if e.is_dir(follow_symlinks=False):
-                    stack.append(Path(e.path))
-                elif e.is_file(follow_symlinks=False):
-                    st = e.stat(follow_symlinks=False)
-                    seen[Path(e.path)] = (st.st_size, st.st_mtime_ns)
+                st = e.stat(follow_symlinks=False)
             except OSError:
                 continue
-    return seen
+            if plain(st, stat.S_ISDIR):
+                stack.append(Path(e.path))
+            elif plain(st, stat.S_ISREG):
+                seen[Path(e.path)] = (st.st_size, st.st_mtime_ns)
+    return seen, False
+
+
+def folder_id(folder):
+    try:
+        st = os.lstat(folder)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino) if plain(st, stat.S_ISDIR) else None
 
 
 def generated_dir(job: dict, session):
@@ -865,20 +870,31 @@ def generated_dir(job: dict, session):
     return codex_home() / "generated_images" / str(session)
 
 
-def copy_exclusive(src: Path, folder: Path) -> Path:
-    """Copy src into folder under a new name, never replacing or following anything."""
+def copy_exclusive(src: Path, folder: Path, sig=None, check=None) -> Path:
+    """Copy src into folder under a new name. Never replaces or follows anything: the
+    source must still be the plain file that was scanned (`sig`), and the destination
+    is created exclusively. A partial copy is removed, also when the watchdog stops it."""
+    st = os.lstat(src)
+    if not plain(st, stat.S_ISREG) or (sig and (st.st_size, st.st_mtime_ns) != sig):
+        raise OSError(f"{src} changed after it was found")
     name, n = src.name, 1
     while True:
         dest = folder / name
         try:
-            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
         except FileExistsError:
             name, n = f"{src.stem}-{n}{src.suffix}", n + 1
             continue
         try:
             with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
-                shutil.copyfileobj(inp, out)
-        except OSError:
+                while True:
+                    chunk = inp.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    if check:
+                        check()
+        except BaseException:
             try:
                 os.unlink(dest)
             except OSError:
@@ -890,26 +906,43 @@ def copy_exclusive(src: Path, folder: Path) -> Path:
 def collect_artifacts(job: dict, session, before: dict, check=None) -> tuple:
     """Gather the files a task produced: Codex's generated images, copied out of
     $CODEX_HOME/generated_images/<session>/ (originals stay), and files that are new or
-    changed in the outputs folder. `before` holds snapshots taken before the run.
-    Returns (paths, errors)."""
+    changed in the outputs folder. `before` holds what was there before the run.
+    Returns (paths, errors, warnings)."""
     out_dir = Path(job["out_dir"])
-    found, errors = [], []
+    found, errors, warnings = [], [], []
     gen = generated_dir(job, session)
     if gen is not None:
-        old = before.get("gen") if before.get("gen_dir") == str(gen) else {}
-        for f, sig in sorted(snapshot(gen, check).items()):
-            if f.parent != gen or old.get(f) == sig:
-                continue  # nested entries, and images from earlier turns of a resumed session
-            try:
+        images, cut = snapshot(gen, check)
+        if cut:
+            warnings.append(f"{gen} holds more than {MAX_SCAN} entries; some images were not examined")
+        known = before.get("gen_dir") == str(gen)
+        if not known and job.get("resume_session"):
+            # Resumed by a name the folder isn't keyed by: fall back to timestamps.
+            warnings.append("resumed by thread name: images are matched by time, not by a snapshot")
+        for f, sig in sorted(images.items()):
+            if f.parent != gen:
+                continue
+            if known and before["gen"].get(f) == sig:
+                continue  # an earlier turn's image
+            if not known and job.get("resume_session") and sig[1] < before["started_ns"]:
+                continue
+            if folder_id(out_dir) is None:
                 out_dir.mkdir(parents=True, exist_ok=True)
-                found.append(copy_exclusive(f, out_dir))
+            if before.get("out_id") and folder_id(out_dir) != before["out_id"]:
+                errors.append(f"{out_dir} was replaced during the run; images were not copied")
+                break
+            try:
+                found.append(copy_exclusive(f, out_dir, sig, check))
             except OSError as e:
                 errors.append(f"could not copy {f} into {out_dir}: {e}")
     copied = set(found)
-    for f, sig in sorted(snapshot(out_dir, check).items()):
+    files, cut = snapshot(out_dir, check)
+    if cut:
+        warnings.append(f"{out_dir} holds more than {MAX_SCAN} entries; the artifact list may be incomplete")
+    for f, sig in sorted(files.items()):
         if f not in copied and before.get("out", {}).get(f) != sig:
             found.append(f)
-    return [str(f) for f in found], errors
+    return [str(f) for f in found], errors, warnings
 
 
 # ---------------------------------------------------------------------- supervisor
@@ -1130,16 +1163,19 @@ def supervise(job_id: str) -> int:
         media = job["kind"] == "task" and job.get("out_dir")
         if media:
             gen = generated_dir(job, job.get("resume_session"))
-            before = {"out": snapshot(Path(job["out_dir"]), check_stop),
-                      "gen_dir": str(gen) if gen else None, "gen": snapshot(gen, check_stop) if gen else {}}
+            before = {"out": snapshot(job["out_dir"], check_stop)[0], "out_id": folder_id(job["out_dir"]),
+                      "gen_dir": str(gen) if gen else None, "gen": snapshot(gen, check_stop)[0],
+                      "started_ns": time.time_ns() - 2_000_000_000}  # coarse filesystem clocks
         r = run_step(main_step, prompt, "result")
         ok = r.pop("ok")
         no_message = r.pop("no_message", False)
         final.update(r)
         if media:
-            final["artifacts"], errs = collect_artifacts(job, r.get("session"), before, check_stop)
+            final["artifacts"], errs, warns = collect_artifacts(job, r.get("session"), before, check_stop)
             if errs:
                 final["artifact_errors"] = errs
+            if warns:
+                final["artifact_warnings"] = warns
             if no_message and final["artifacts"] and not errs:
                 # An image-only answer is a normal outcome, not a failure.
                 ok = True
@@ -1391,6 +1427,8 @@ def render_result(job: dict, as_json: bool) -> str:
         head += "\nartifacts:" + "".join(f"\n  {f}" for f in job["artifacts"])
     for e in job.get("artifact_errors") or []:
         head += f"\nartifact error: {e}"
+    for w in job.get("artifact_warnings") or []:
+        head += f"\nartifact warning: {w}"
     return head + ("\n\n" + text.strip() if text.strip() else "")
 
 
@@ -1429,7 +1467,7 @@ def cmd_result(a) -> int:
 def summary(job: dict) -> dict:
     keys = ("id", "target", "kind", "status", "label", "cwd", "created", "ended", "session",
             "exit_code", "error", "reason", "hint", "cost_usd", "mode", "pr", "fix_status", "posted",
-            "out_dir", "artifacts", "artifact_errors")
+            "out_dir", "artifacts", "artifact_errors", "artifact_warnings")
     out = {k: job.get(k) for k in keys if job.get(k) is not None}
     if job.get("owner"):
         o = job["owner"]

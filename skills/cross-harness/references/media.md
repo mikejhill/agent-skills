@@ -5,7 +5,7 @@
 ```text
 xh.py task -t codex --attach mock.png --attach notes.md "Redesign this screen; explain the changes."
 xh.py task -t codex "Generate a 1024x1024 app icon: a paper plane on a teal background."
-xh.py task -t claude --out ./out --attach data.csv "Plot weekly totals as an SVG."
+xh.py task -t claude --write --out ./out --attach data.csv "Plot weekly totals as an SVG."
 ```
 
 ## Input: `--attach FILE`
@@ -29,8 +29,10 @@ any task.
 Every task has an outputs folder: `--out DIR` (created if missing), or else
 `<state home>/jobs/<job>/artifacts/`. When the job ends, `wait` and `result` list the
 files under `artifacts:` (also in `--json`): copied images, plus files that are new or
-changed in the folder since the job started. A failed copy shows as `artifact error:`
-and fails the job.
+changed in the folder since the job started. Links and junctions are never followed. A
+failed copy, or an outputs folder replaced during the run, shows as `artifact error:`
+and fails the job. `artifact warning:` notes a scan cut off at 5000 entries, or a task
+resumed by thread name, where earlier images are told apart by time only.
 
 - **Codex images.** Codex's image-generation tool saves to
   `$CODEX_HOME/generated_images/<session>/` (default `~/.codex`). Codex itself writes
@@ -42,9 +44,9 @@ and fails the job.
   with images and no text counts as success.
 - **Other files** need `--write`. With `--write --out DIR`, the prompt tells the agent to
   save deliverables in `DIR` and list them, and `DIR` becomes writable next to `--cwd`
-  (Claude Code `--add-dir`; Codex `--add-dir`, or on `--resume` a
-  `sandbox_workspace_write.writable_roots` override for that run). Read-only tasks
-  stay read-only: the prompt says the run can't write files. To keep the repository
+  (`--add-dir` for both, which keeps any writable roots already configured). Read-only
+  tasks stay read-only: the prompt says the run can't write files. With
+  `--sandbox inherit`, the prompt names `DIR` and the target's own settings decide. To keep the repository
   untouched, point `--cwd` at a scratch folder or a worktree.
 
 Claude Code has no image generation of its own; it can still write files such as SVG,
