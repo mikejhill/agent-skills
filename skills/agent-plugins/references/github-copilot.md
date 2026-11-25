@@ -6,7 +6,7 @@ Copilot CLI, the Copilot app, the Copilot SDK, and VS Code support Agent Plugins
 
 | Format | Marker | Root variable |
 | --- | --- | --- |
-| Agent Plugins 1.0 | Root `plugin.json` with the 1.0 `$schema` | `${PLUGIN_ROOT}` |
+| Agent Plugins 1.0 (Copilot CLI also recognizes a 1.1.0 schema) | Root `plugin.json` with the canonical `$schema` | `${PLUGIN_ROOT}` |
 | Claude | `.claude-plugin/plugin.json` | `${CLAUDE_PLUGIN_ROOT}` |
 | Copilot (default when nothing else matches) | Root `plugin.json` without `$schema` | `${PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT}` |
 | Legacy OpenPlugin | `.plugin/plugin.json` | `${PLUGIN_ROOT}` |
@@ -30,8 +30,9 @@ The root 1.0 `$schema` wins. Do not ship a Copilot-legacy root `plugin.json` nex
 
 ## Marketplace
 
-- Catalog: `.github/plugin/marketplace.json` in the marketplace repository. Copilot CLI also reads a Claude `.claude-plugin/marketplace.json`.
-- Entries: `name`, `description`, `version`, `source` (a `./` path or an object with `source: "url"`, `url`, `ref`). A marketplace feed itself cannot be pinned to a ref.
+- Catalog: `.github/plugin/marketplace.json` or a root `marketplace.json`; keep only one. Copilot CLI also reads a Claude `.claude-plugin/marketplace.json`.
+- Top level: `name`, `owner` (object with `name`), `metadata`, `plugins[]`.
+- Entries: `name`, `description`, `version`, `source` (a relative path, with or without `./`, or an object with `source: "url"`, `url`, `ref`). A marketplace feed itself cannot be pinned to a ref.
 - Default marketplaces include `github/awesome-copilot`.
 - Enterprise policy keys in managed settings: `enabledPlugins`, `extraKnownMarketplaces`, `strictKnownMarketplaces`, `allowManagedHooksOnly`.
 

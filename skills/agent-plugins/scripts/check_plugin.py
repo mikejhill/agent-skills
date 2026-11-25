@@ -38,6 +38,7 @@ COMPONENT_KEYS = {"skills", "commands", "agents", "hooks", "mcpServers", "lspSer
 CLAUDE_REPLACING_KEYS = {"skills", "commands", "agents", "hooks", "outputStyles", "themes"}
 CLAUDE_LAYOUT = ("skills", "commands", "agents", "hooks/hooks.json", ".mcp.json", ".lsp.json", "output-styles")
 CODEX_PATH_KEYS = ("apps", "onboardingSkill", "hooks")
+CLAUDE_INLINE_KEYS = {"commands", "hooks", "mcpServers", "lspServers"}
 NAME_10 = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
 NAME_KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 NAMESPACE = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)+$")
@@ -55,6 +56,7 @@ CLAUDE_RESERVED_MARKETPLACES = {
 CATALOGS = {
     "claude": Path(".claude-plugin/marketplace.json"),
     "copilot": Path(".github/plugin/marketplace.json"),
+    "copilot-root": Path("marketplace.json"),
     "codex": Path(".agents/plugins/marketplace.json"),
 }
 # Required locator fields for remote sources, per catalog flavor.
@@ -62,6 +64,7 @@ REMOTE_SOURCES = {
     "claude": {"github": ("repo",), "url": ("url",), "git-subdir": ("url", "path"), "npm": ("package",),
                "archive": ("url",), "command": ("command",)},
     "copilot": {"github": ("repo",), "url": ("url",)},
+    "copilot-root": {"github": ("repo",), "url": ("url",)},
     "codex": {"url": ("url",), "git-subdir": ("url", "path"), "npm": ("package",)},
 }
 CODEX_INSTALL = {"AVAILABLE", "INSTALLED_BY_DEFAULT", "NOT_AVAILABLE"}
@@ -73,6 +76,37 @@ CWD = re.compile(r"^(?:\./.*|\$\{PLUGIN_(?:ROOT|DATA)\}(?:/.*)?)$")
 
 def is_str_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def frontmatter_scalar(front: str, key: str) -> str | None:
+    """Return a top-level YAML scalar from frontmatter, or None when absent, empty, or null.
+
+    Handles plain, quoted, and block (| or >) scalars; enough for name and description.
+    """
+    lines = front.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(rf"{re.escape(key)}:(?:[ \t]+(.*))?$", line)
+        if not m:
+            continue
+        rest = (m.group(1) or "").strip()
+        if rest[:1] in ("|", ">") or rest == "" or rest.startswith("#"):
+            block = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and not nxt[:1].isspace():
+                    break
+                block.append(nxt.strip())
+            text = " ".join(x for x in block if x)
+            return text or None
+        if rest[0] in "'\"":
+            q = rest[0]
+            end = rest.find(q, 1)
+            while q == "'" and end != -1 and rest[end + 1:end + 2] == "'":
+                end = rest.find(q, end + 2)
+            value = rest[1:end] if end != -1 else rest[1:]
+            return value.replace("''", "'") if q == "'" else value
+        value = re.split(r"[ \t]#", rest, maxsplit=1)[0].strip()
+        return None if value in ("~", "null", "Null", "NULL") else value
+    return None
 
 
 def is_loopback(host: str) -> bool:
@@ -111,7 +145,7 @@ class Checker:
         try:
             target.resolve().relative_to(base.resolve())
             return True
-        except (ValueError, OSError):
+        except (ValueError, OSError, RuntimeError):
             return False
 
     def contained(self, base: Path, path: Path) -> bool:
@@ -198,7 +232,14 @@ class Checker:
             else:
                 schema = root_data["$schema"]
                 spec_version = next((v for v in SPEC_VERSIONS if schema == PLUGIN_SCHEMA.format(v)), None)
-                if spec_version is None:
+                other = re.fullmatch(r"https://agent-plugins\.org/schemas/([0-9][0-9A-Za-z.+-]*)/plugin\.schema\.json",
+                                     str(schema))
+                if spec_version is None and other:
+                    info["format"] = f"agent-plugins-{other.group(1)}"
+                    self.warn(root_manifest, f"Agent Plugins {other.group(1)} is not implemented by this checker "
+                                             f"(it validates {', '.join(SPEC_VERSIONS)}); only paths and skills are "
+                                             "checked. Validate with each target client")
+                elif spec_version is None:
                     self.error(root_manifest, f"unknown $schema {schema!r}; Agent Plugins 1.0 uses "
                                               f"{PLUGIN_SCHEMA.format(SPEC_VERSIONS[-1])!r}")
                 else:
@@ -230,6 +271,14 @@ class Checker:
                 self.warn(claude_dir, f"only manifests belong in .claude-plugin/; move {', '.join(extra)} "
                                       "to the plugin root")
 
+        open_manifest = d / ".plugin" / "plugin.json"
+        if open_manifest.is_file():
+            data = self.load(open_manifest, d)
+            if data is not None:
+                self.warn(open_manifest, "legacy OpenPlugin manifest; migrate to a root Agent Plugins plugin.json")
+                self.check_manifest_legacy(d, open_manifest, data)
+                remember(".plugin/plugin.json", data)
+
         codex_manifest = d / ".codex-plugin" / "plugin.json"
         if codex_manifest.is_file():
             data = self.load(codex_manifest, d)
@@ -237,6 +286,11 @@ class Checker:
                 ext = (root_data or {}).get("extensions")
                 if isinstance(ext, dict) and "com.openai" in ext:
                     self.warn(codex_manifest, "ignored: plugin.json already has extensions['com.openai']")
+                else:
+                    self.check_codex_paths(d, codex_manifest, data, "")
+                    inner = data.get("extensions")
+                    if isinstance(inner, dict) and isinstance(inner.get("com.openai"), dict):
+                        self.check_codex_paths(d, codex_manifest, inner["com.openai"], "extensions.com.openai.")
                 remember(".codex-plugin/plugin.json", data)
 
         if len(set(names.values())) > 1:
@@ -271,6 +325,13 @@ class Checker:
                     continue
                 p = Path(entry.path)
                 if not self.contained(d, p):
+                    continue
+                try:
+                    broken = p.is_symlink() and not p.exists()
+                except (OSError, RuntimeError):
+                    broken = True
+                if broken:
+                    self.error(p, "symlink is broken or loops; it resolves outside the root or nowhere")
                     continue
                 try:
                     if entry.is_dir(follow_symlinks=False) and not p.is_symlink():
@@ -316,9 +377,12 @@ class Checker:
                     self.error(path, f"extensions.{key} must be an object")
             openai = ext.get("com.openai")
             if isinstance(openai, dict):
-                for key in CODEX_PATH_KEYS:
-                    if key in openai:
-                        self.check_path_values(d, openai[key], path, f"extensions.com.openai.{key}")
+                self.check_codex_paths(d, path, openai, "extensions.com.openai.")
+
+    def check_codex_paths(self, d: Path, path: Path, data: dict, prefix: str) -> None:
+        for key in CODEX_PATH_KEYS:
+            if key in data:
+                self.check_path_values(d, data[key], path, f"{prefix}{key}")
 
     def check_manifest_legacy(self, d: Path, path: Path, data: dict) -> None:
         if not isinstance(data.get("name"), str):
@@ -341,8 +405,9 @@ class Checker:
             if not isinstance(server, dict):
                 self.error(path, f"{where} must be an object")
                 continue
-            if "extensions" in server and not isinstance(server["extensions"], dict):
-                self.error(path, f"{where}.extensions must be an object")
+            if "extensions" in server:
+                self.warn(path, f"{where}.extensions is a client extension (Codex reads auth there), not a "
+                                "portable server field; strict Agent Plugins clients may skip this server")
             kind = server.get("type")
             if kind == "stdio":
                 self.check_fields(path, where, server, STDIO_FIELDS, "stdio")
@@ -358,8 +423,7 @@ class Checker:
 
     def check_fields(self, path: Path, where: str, server: dict, allowed: set, kind: str) -> None:
         for key in sorted(set(server) - allowed - {"extensions"}):
-            self.error(path, f"{where}.{key}: not a {kind} field; clients skip this server. "
-                             "Put client-specific settings under the server's 'extensions'")
+            self.error(path, f"{where}.{key}: not a {kind} field; clients skip this server")
 
     def check_stdio(self, d: Path, path: Path, where: str, server: dict) -> None:
         command = server.get("command")
@@ -387,7 +451,7 @@ class Checker:
                         self.error(path, f"{where}.env must not set {key}; the client provides it")
         if "cwd" in server:
             cwd = server["cwd"]
-            if not isinstance(cwd, str) or not CWD.match(cwd) or ".." in cwd.split("/"):
+            if not isinstance(cwd, str) or "\\" in cwd or not CWD.fullmatch(cwd) or ".." in cwd.split("/"):
                 self.error(path, f"{where}.cwd must be './...', '${{PLUGIN_ROOT}}[/...]', or '${{PLUGIN_DATA}}[/...]'")
 
     def check_http(self, path: Path, where: str, server: dict) -> None:
@@ -415,12 +479,12 @@ class Checker:
                 return
             seen: set[str] = set()
             for key, value in headers.items():
-                if not HEADER_NAME.match(key):
+                if not HEADER_NAME.fullmatch(key):
                     self.error(path, f"{where}.headers: {key!r} is not a valid header name")
                 if key.lower() in seen:
                     self.error(path, f"{where}.headers: {key!r} duplicates another header (names are case-insensitive)")
                 seen.add(key.lower())
-                if not isinstance(value, str) or not HEADER_VALUE.match(value):
+                if not isinstance(value, str) or not HEADER_VALUE.fullmatch(value):
                     self.error(path, f"{where}.headers.{key} must be a string without control characters")
 
     def check_manifest_claude(self, d: Path, path: Path, data: dict) -> None:
@@ -437,10 +501,23 @@ class Checker:
         self.check_claude_components(d, path, data, "")
 
     def check_claude_components(self, d: Path, path: Path, data: dict, prefix: str) -> None:
+        entry = bool(prefix)
         for key in sorted(COMPONENT_KEYS & set(data)):
-            values = data[key] if isinstance(data[key], list) else [data[key]]
+            raw = data[key]
+            if entry and key == "hooks" and not isinstance(raw, dict):
+                self.error(path, f"{prefix}hooks: a catalog entry accepts only inline hooks; put hook files "
+                                 "in the plugin and reference them from its manifest")
+                continue
+            if isinstance(raw, dict):
+                if key not in CLAUDE_INLINE_KEYS:
+                    self.error(path, f"{prefix}{key} must be a path or a list of paths")
+                continue
+            values = raw if isinstance(raw, list) else [raw]
             for value in values:
+                if isinstance(value, dict) and key in CLAUDE_INLINE_KEYS - {"commands"}:
+                    continue
                 if not isinstance(value, str):
+                    self.error(path, f"{prefix}{key}: {value!r} is not a valid value")
                     continue
                 if key == "skills" and value in (".", "./"):
                     continue
@@ -471,14 +548,14 @@ class Checker:
                 continue
             match = re.match(r"---\r?\n(.*?)\r?\n---", text, re.S)
             front = match.group(1) if match else ""
-            name = re.search(r"^name:[ \t]*['\"]?([^'\"\s#]+)", front, re.M)
-            desc = re.search(r"^description:[ \t]*\S", front, re.M)
+            name = frontmatter_scalar(front, "name")
+            desc = frontmatter_scalar(front, "description")
             report = self.error if portable else self.warn
             if not name:
                 if portable:
                     self.error(skill_md, "frontmatter 'name' is required by Agent Skills; portable clients skip it")
-            elif name.group(1) != child.name:
-                report(skill_md, f"name {name.group(1)!r} must equal the folder name {child.name!r}")
+            elif name != child.name:
+                report(skill_md, f"name {name!r} must equal the folder name {child.name!r}")
             if not desc:
                 report(skill_md, "frontmatter 'description' is required by Agent Skills")
 
@@ -490,6 +567,9 @@ class Checker:
                 data = self.load(path, self.root)
                 if data is not None:
                     self.catalogs[kind] = self.check_catalog(kind, path, data)
+        if "copilot" in self.catalogs and "copilot-root" in self.catalogs:
+            self.warn(self.root / "marketplace.json", "Copilot loads one catalog; keep either marketplace.json or "
+                                                     ".github/plugin/marketplace.json, not both")
         if len(self.catalogs) < 2:
             return
         union = sorted(set().union(*(set(v) for v in self.catalogs.values())))
@@ -516,7 +596,7 @@ class Checker:
                 self.error(path, f"marketplace name {name!r} is reserved by Claude Code")
             if re.search(r"[\s/\\]", name) or name in {".", ".."} or ".." in name:
                 self.error(path, f"marketplace name {name!r}: no spaces, slashes, or '..'")
-        if kind == "claude":
+        if kind != "codex":
             owner = data.get("owner")
             if not (isinstance(owner, dict) and isinstance(owner.get("name"), str)):
                 self.error(path, "'owner.name' is required")
@@ -544,7 +624,7 @@ class Checker:
             local = self.local_source(kind, path, where, entry.get("source"), plugin_root)
             if local is None:
                 continue
-            supplies = kind == "claude" and entry.get("strict") is False and bool(CLAUDE_REPLACING_KEYS & set(entry))
+            supplies = kind == "claude" and bool((COMPONENT_KEYS | {"themes"}) & set(entry))
             info = self.check_plugin(local, entry_components=supplies)
             if info.get("name") and info["name"] != ename:
                 self.error(path, f"{where}: entry name differs from the plugin manifest name {info['name']!r}")
@@ -580,6 +660,9 @@ class Checker:
         if not isinstance(source, str):
             self.error(path, f"{where}.source must be a string or an object")
             return None
+        if kind.startswith("copilot") and source not in (".", "") and not source.startswith(("./", "/")) \
+                and "://" not in source:
+            source = "./" + source
         if kind == "claude" and source in (".", "./"):
             return self.root
         if kind == "claude" and isinstance(plugin_root, str) and re.fullmatch(r"[^/\\.][^/\\]*", source):

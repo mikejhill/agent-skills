@@ -15,7 +15,7 @@ Codex reads Agent Plugins 1.0 and keeps OpenAI-only settings in the `com.openai`
 
 - `.codex-plugin/plugin.json` is the older Codex manifest. Codex uses it only when the root manifest has no `extensions.com.openai`. Do not create one for new plugins; remove it when migrating, or keep it identical in name and version.
 - Skills: `skills/<name>/SKILL.md`. MCP: root `mcp.json`, with `type` per server. Codex lists `stdio` and `streamable-http`, not `sse`.
-- MCP authentication (OAuth or API keys) goes on the server entry in `mcp.json`, as `mcpServers.<name>.extensions["com.openai"].auth`, not in `plugin.json`. Other clients ignore that namespace.
+- MCP authentication (OAuth or API keys) goes on the server entry in `mcp.json`, as `mcpServers.<name>.extensions["com.openai"].auth`, not in `plugin.json`. This is a Codex extension: the 1.0 server variants are closed, so a strict 1.0 client may skip that server. In a multi-harness plugin, prefer servers that need no static credentials, or test the server in every target.
 - Plugins with hooks work when installed manually but are not eligible for the public directory (2026-11).
 
 ## Marketplace

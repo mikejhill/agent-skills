@@ -62,8 +62,11 @@ class CheckPluginTest(unittest.TestCase):
         self.assertEqual(self.run_checker(), [])
 
     def test_unknown_schema_and_bad_name(self) -> None:
-        write(self.root, {"plugin.json": {"$schema": SCHEMA.replace("1.0.0", "9.0.0"), "name": "x"}})
+        write(self.root, {"plugin.json": {"$schema": "https://example.com/plugin.schema.json", "name": "x"}})
         self.assertTrue(any("unknown $schema" in m for m in self.errors()))
+        write(self.root, {"plugin.json": {"$schema": SCHEMA.replace("1.0.0", "1.1.0"), "name": "x"}})
+        self.assertEqual(self.errors(), [])
+        self.assertTrue(any("1.1.0 is not implemented by this checker" in m for m in self.warnings()))
         write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "Bad--Name"}})
         self.assertTrue(any("name 'Bad--Name'" in m for m in self.errors()))
 
@@ -148,8 +151,8 @@ class CheckPluginTest(unittest.TestCase):
             ".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
                 {"name": "alpha", "source": "./plugins/alpha"},
                 {"name": "beta", "source": "./plugins/beta"}]},
-            ".github/plugin/marketplace.json": {"name": "example-tools", "plugins": [
-                {"name": "alpha", "source": "./plugins/alpha"}]},
+            ".github/plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+                {"name": "alpha", "source": "plugins/alpha"}]},
             ".agents/plugins/marketplace.json": {"name": "example-tools", "plugins": [
                 {"name": "alpha", "source": {"source": "local", "path": "./plugins/alpha"},
                  "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}, "category": "Dev"},
@@ -271,11 +274,55 @@ class CheckPluginTest(unittest.TestCase):
                  "policy": {"installation": ["AVAILABLE"]}, "category": "Dev"}]},
             ".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
                 {"name": "alpha", "source": "./plugins/alpha", "version": "2"}]},
-            ".github/plugin/marketplace.json": {"name": "m", "plugins": []}})
+            ".github/plugin/marketplace.json": {"name": "m", "owner": {"name": "o"}, "plugins": []}})
         warnings = "\n".join(self.warnings())
         self.assertIn("policy.installation should be", warnings)
         self.assertIn("policy.authentication should be", warnings)
         self.assertIn("alpha: version differs between catalogs", warnings)
+
+    def test_round3_fixes(self) -> None:
+        files = good_plugin("x")
+        files["skills/rel/SKILL.md"] = "---\nname: rel notes\ndescription: # TODO\n---\n"
+        files["skills/ok/SKILL.md"] = "---\nname: 'ok'\ndescription: >-\n  Folded\n  text.\n---\n"
+        files["mcp.json"] = {"$schema": MCP, "mcpServers": {
+            "cwd": {"type": "stdio", "command": "node", "cwd": "./a\\..\\.."},
+            "nl": {"type": "streamable-http", "url": "https://example.com", "headers": {"X-A": "v\n"}},
+            "auth": {"type": "stdio", "command": "node", "extensions": {"com.openai": {"auth": {}}}}}}
+        files[".claude-plugin/plugin.json"] = {"name": "x", "agents": [42], "skills": False}
+        files[".codex-plugin/plugin.json"] = {"name": "x", "onboardingSkill": "./nope/SKILL.md"}
+        write(self.root, files)
+        errors = "\n".join(self.errors())
+        for text in ("name 'rel notes' must equal", "'description' is required", "mcpServers.cwd.cwd",
+                     "headers.X-A must be a string without control", "agents: 42 is not a valid value",
+                     "skills: False is not a valid value", "onboardingSkill './nope/SKILL.md': not found"):
+            self.assertIn(text, errors)
+        self.assertNotIn("skills/ok", errors)
+        self.assertTrue(any("mcpServers.auth.extensions is a client extension" in m for m in self.warnings()))
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_symlink_loop_is_reported(self) -> None:
+        write(self.root, good_plugin("x"))
+        os.symlink(self.root / "loop", self.root / "loop")
+        self.assertTrue(any("resolves outside" in m for m in self.errors()))
+
+    def test_claude_entry_rules(self) -> None:
+        write(self.root / "plugins" / "bare", {"tools/s.json": "{}"})
+        write(self.root / "plugins" / "hooky", good_plugin("hooky"))
+        write(self.root / "plugins" / "hooky", {"h.json": "{}"})
+        write(self.root, {".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+            {"name": "bare", "source": "./plugins/bare", "mcpServers": "./tools/s.json"},
+            {"name": "hooky", "source": "./plugins/hooky", "hooks": "./h.json"}]}})
+        errors = "\n".join(self.errors())
+        self.assertNotIn("no plugin manifest", errors)
+        self.assertIn("accepts only inline hooks", errors)
+
+    def test_copilot_root_catalog_and_owner(self) -> None:
+        write(self.root / "plugins" / "alpha", good_plugin("alpha"))
+        write(self.root, {"marketplace.json": {"name": "m", "plugins": [{"name": "alpha", "source": "plugins/alpha"}]},
+                          ".github/plugin/marketplace.json": {"name": "m", "owner": {"name": "o"}, "plugins": [
+                              {"name": "alpha", "source": "./plugins/alpha"}]}})
+        self.assertIn("'owner.name' is required", self.errors())
+        self.assertTrue(any("Copilot loads one catalog" in m for m in self.warnings()))
 
     def test_empty_folder_and_cli(self) -> None:
         self.assertTrue(any("no plugin manifest" in m for m in self.errors()))

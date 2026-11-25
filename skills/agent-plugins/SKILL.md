@@ -47,7 +47,7 @@ List the harnesses the plugin must load in, asking if unknown, then pick the lay
 | Claude Code only | Claude format only |
 | Claude Code and 1.0 clients (default for a public library) | 1.0 core plus `.claude-plugin/plugin.json`, sharing `skills/` |
 
-Put each harness-only component where only that harness reads it: a 1.0 extension namespace (`com.github.copilot/`, `extensions.com.openai`) and Claude's own folders. The same agent or hook usually needs a copy per harness, because frontmatter, tool names, and hook events differ.
+Put each harness-only component where only that harness reads it: a 1.0 extension namespace (`com.github.copilot/`, `extensions.com.openai`) and Claude's own folders. The same agent or hook usually needs a copy per harness, because frontmatter, tool names, and hook events differ. Watch for default paths that two harnesses share: Codex and Claude both read `hooks/hooks.json`.
 
 ## Workflow
 

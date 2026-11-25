@@ -5,7 +5,7 @@ A marketplace is a catalog file that lists plugins and where to fetch them. Agen
 | Harness | Catalog path (from the marketplace root) | Also reads |
 | --- | --- | --- |
 | Claude Code | `.claude-plugin/marketplace.json` | — |
-| GitHub Copilot | `.github/plugin/marketplace.json` | `.claude-plugin/marketplace.json` (CLI) |
+| GitHub Copilot | `.github/plugin/marketplace.json` or `marketplace.json` | `.claude-plugin/marketplace.json` (CLI) |
 | Codex | `.agents/plugins/marketplace.json` | `.claude-plugin/marketplace.json` |
 
 ## Which catalogs to ship
@@ -29,6 +29,7 @@ A marketplace is a catalog file that lists plugins and where to fetch them. Agen
 ```
 
 - Required: `name`, `owner.name`, `plugins[]` with `name` and `source`. Optional: `description`, `version`, `metadata.pluginRoot` (base folder for bare-name sources), `renames`, `forceRemoveDeletedPlugins`.
+- Entry `hooks` must be inline objects; put hook files in the plugin itself.
 - Source types: `./` path, `github` (`repo`, `ref`, `sha`), `url` (git URL), `git-subdir` (`url`, `path`), `npm`, `archive` (HTTPS zip with `sha256`), `command`. Only object sources work when the catalog itself is added by URL.
 - `strict` (default `true`): the plugin's own manifest is authoritative and entry component fields are appended. `strict: false` makes the entry the manifest; it fails if both define components. Use `strict: false` to publish a subset of a shared `skills/` folder without a per-plugin manifest.
 - Reserved marketplace names include `agent-skills`, `claude-plugins-official`, `anthropic-plugins`, and any `claudeai-` prefix. Name the catalog after the publisher or the collection.

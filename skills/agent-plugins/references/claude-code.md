@@ -39,7 +39,8 @@ Claude Code reads only its own format. It is not an Agent Plugins client (2026-1
 - Keep Claude-only keys in `.claude-plugin/plugin.json`. Put the shared metadata (`name`, `version`, `description`, `author`, `license`) in both manifests with identical values.
 - Claude finds the shared `skills/` by default; no `skills` key is needed.
 - MCP: declare servers in `.mcp.json` or inline in `.claude-plugin/plugin.json` with `${CLAUDE_PLUGIN_ROOT}`. Do not reuse the 1.0 `mcp.json`; its schema and variables differ.
-- Claude-format folders at the root (`agents/`, `commands/`, `hooks/`) are ignored by 1.0 clients when the root manifest carries the 1.0 `$schema`. Without it, Copilot reads the package as Claude or Copilot format and loads them.
+- Claude-format folders at the root (`agents/`, `commands/`) are ignored by Copilot and VS Code when the root manifest carries the 1.0 `$schema`. Without it, Copilot reads the package as Claude or Copilot format and loads them.
+- Hooks are the exception: Codex discovers `hooks/hooks.json` by default. Put Claude-only hooks at a non-default path, such as `claude/hooks.json`, and reference it from the `hooks` key in `.claude-plugin/plugin.json`. Give Codex its own hooks through `extensions["com.openai"].hooks`.
 
 ## Validate and test
 
