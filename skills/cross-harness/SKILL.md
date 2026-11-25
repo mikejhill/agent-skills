@@ -113,8 +113,8 @@ sees none of your conversation. Details: [delegation](references/delegation.md).
   other files, and every file for Claude Code, are listed in the prompt to open.
 - Codex can generate images: ask in plain words. The skill copies them from Codex's
   image folder into the task's outputs folder, even in a read-only task.
-- `--out DIR` sets that folder (default: the job's `artifacts/`) and tells the agent to
-  save its deliverables there, with write access limited to it where the target allows.
+- `--out DIR` sets that folder (default: the job's `artifacts/`). With `--write`, the
+  agent is told to save its deliverables there, and the folder is made writable.
 - `wait` and `result` list the collected files under `artifacts:`. Look at them before
   describing them. Details: [media](references/media.md).
 

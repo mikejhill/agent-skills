@@ -59,14 +59,15 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
   not a hard read-only guarantee; prompt reviews are. Tasks are
   read-only unless `--write`. No `--trust` or bypass flags.
 - **Media through the CLIs, not around them** (2026-11-25). Inputs: Codex `-i` for
-  images, a prompt preamble with absolute paths for everything else (Claude Code's Read
-  tool views images). Outputs: Codex's image tool saves to
-  `$CODEX_HOME/generated_images/<thread_id>/` from outside its sandbox, and `--json`
-  carries no image event, so the supervisor copies that folder's new files after the
-  run instead of asking the model to copy them (which needed sandbox escalation in a
-  live test). Files the agent writes go to `--out`, with writes scoped to it: a Claude
-  `Edit(//path/**)` rule, or a Codex `sandbox_workspace_write.writable_roots` entry (a
-  config key, because `exec resume` has no `--add-dir`).
+  images, ended with `--` because `-i` is variadic, and a prompt preamble with absolute
+  paths for everything else (Claude Code's Read tool views images). Outputs: Codex's
+  image tool saves to `$CODEX_HOME/generated_images/<thread_id>/` from outside the
+  model's sandbox, and `--json` carries no image event, so the supervisor copies that
+  folder's new files after the run instead of asking the model to copy them (which
+  needed sandbox escalation in a live test). Other files need `--write`, which makes
+  `--out` writable. Read-only stays read-only: a scoped Claude allow rule could not
+  override broader allows from the user's settings, so it was dropped for fail-closed
+  denies. Outputs are found by comparing before and after snapshots, not timestamps.
 - **One nesting level** (`CROSS_HARNESS_DEPTH`), to stop ping-pong loops.
 
 ## Upstream problems addressed
@@ -140,3 +141,4 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
 - 2026-11-22: [agent] Codex round 3: the review-clone procedure is now fully self-contained. It covers per-OS scratch roots with trust checks, host-specific PR/MR refspecs, the `KEEP` retention marker, and the unique-work check before removal.
 - 2026-11-22: [agent] Codex round 4: replaced the inline scratch-storage policy with composition. Clones go wherever the user's scratch rules say, preferring a worktree of their clone, and otherwise the agent asks. The skill keeps only review-specific steps: remote-tracking PR/MR fetch, a HEAD-matches-ref check each round, and unique-work checks (including submodules) before removing what it created.
 - 2026-11-25: [operator] "I would like to be able to use Codex from Claude in order to build images, among other multimodal features. Does our cross-harness skill support images and other files or media as input and output? If not, please design an effective solution and implement it." [agent] It did not: prompts were text-only and only the final message came back. Probed codex-cli 0.170.0 on Windows: `-i/--image` is variadic and swallows a following `-` or prompt, and silently ignores missing files; `exec resume` accepts `-i`; `image_generation` is a stable, default-on feature; generated PNGs land in `generated_images/<thread_id>/` even under read-only, and the `--json` stream has no image event. Added `task --attach` and `--out`, automatic collection of Codex's generated images, an `artifacts` result field, `references/media.md`, and smoke tests.
+- 2026-11-25: [agent] Live check on Windows: attach, resume, and `--out` worked; an image-only answer was reported as failed, and Codex's Windows `workspace-write` sandbox needed escalation to write. Astra review (9 findings) and fixes: read-only Claude keeps full write denies (no scoped allow); image-only answers succeed; exclusive, non-replacing copies with errors reported; snapshot-based output detection with a scan cap and watchdog checks; comma paths listed instead of `-i`; `--add-dir` instead of replacing writable roots, and no change under `--sandbox inherit`; TOML-safe paths.
