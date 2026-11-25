@@ -64,6 +64,11 @@ CLAUDE_READ_TOOLS = [
 ]
 CLAUDE_WRITE_DENY = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
 
+# Attachments with these suffixes go to Codex as images (`-i`); other files are
+# listed in the prompt for the agent to read.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
 
 # --------------------------------------------------------------------------- utils
 
@@ -500,14 +505,24 @@ def build_command(job: dict, step: str, prompt, out_path: Path) -> tuple:
         if ephemeral:
             common += ["--ephemeral"]
         cfg_sb = [] if sandbox == "inherit" else ["-c", f'sandbox_mode="{sandbox}"']
+        # With --write, the outputs folder is writable alongside --cwd.
+        add_out = step == "task" and job.get("write_out") and sandbox == "workspace-write"
+        # `-i` takes several values and would swallow the "-" that means "prompt on
+        # stdin", so the image list ends with "--".
+        images = [x for f in (job.get("attachments") or []) if step == "task"
+                  and codex_image(f) for x in ("-i", f)]
+        stdin_arg = images + ["--", "-"] if images else ["-"]
         if native:
             scope = (["--commit", job["commit"]] if job.get("commit")
                      else ["--base", job["base"]] if job.get("base") else ["--uncommitted"])
             return argv + ["exec", "review"] + scope + cfg_sb + common + job.get("native_args", []) + extra, None
         if resume:
-            return argv + ["exec", "resume", resume] + cfg_sb + common + extra + ["-"], prompt
+            # `exec resume` has no --add-dir of its own; the parent `exec` takes it.
+            roots = ["--add-dir", job["out_dir"]] if add_out else []
+            return argv + ["exec"] + roots + ["resume", resume] + cfg_sb + common + extra + stdin_arg, prompt
         sb = [] if sandbox == "inherit" else ["-s", sandbox]
-        return argv + ["exec"] + sb + common + extra + ["-"], prompt
+        roots = ["--add-dir", job["out_dir"]] if add_out else []
+        return argv + ["exec"] + sb + roots + common + extra + stdin_arg, prompt
 
     # claude
     args = ["-p", "--output-format", "json"]
@@ -522,6 +537,8 @@ def build_command(job: dict, step: str, prompt, out_path: Path) -> tuple:
     if resume:
         args += ["--resume", resume]
     allow = job.get("allow_tools", [])
+    if step == "task" and job.get("write_out") and sandbox == "workspace-write":
+        args += ["--add-dir", job["out_dir"]]  # acceptEdits then covers the outputs folder too
     if native:
         # The harness's own review command decides what it does; grant what it
         # needs. It edits only when asked to fix.
@@ -752,6 +769,205 @@ def _linux_pdeathsig():
         pass
 
 
+# -------------------------------------------------------------------------- media
+
+
+def codex_home(cwd=None) -> Path:
+    """Codex's home as the child sees it: a relative CODEX_HOME is relative to --cwd."""
+    env = os.environ.get("CODEX_HOME")
+    if not env:
+        return Path.home() / ".codex"
+    return Path(env) if Path(env).is_absolute() else Path(cwd or os.getcwd()) / env
+
+
+def codex_image(path: str) -> bool:
+    """Whether Codex gets this attachment as image input. Codex splits each -i value
+    on commas, so a path with a comma is listed in the prompt instead."""
+    return path.lower().endswith(IMAGE_SUFFIXES) and "," not in path
+
+
+def media_preamble(target: str, attachments: list, out_dir, sandbox: str) -> str:
+    """Prompt lines that tell the other agent about attachments and where outputs go."""
+    lines = []
+    if attachments:
+        lines.append("Attached files (absolute paths). Open the ones you need:")
+        for f in attachments:
+            note = " (image, already attached to this message)" if target == "codex" and codex_image(f) else ""
+            lines.append(f"- {f}{note}")
+    if out_dir:
+        if sandbox == "read-only":
+            lines.append("This run cannot write files." + (
+                " Images you create with your image-generation tool are collected automatically; "
+                "do not copy them." if target == "codex" else ""))
+        else:
+            lines.append(f"Save every file you create as a deliverable for this request in: {out_dir}")
+            lines.append("List each saved file's path in your final answer.")
+            if target == "codex":
+                lines.append("Images you create with your image-generation tool are collected from "
+                             "their default location automatically; you don't need to copy them.")
+    return "\n".join(lines) + "\n\n---\n\n" if lines else ""
+
+
+def resolve_attachments(paths) -> list:
+    out = []
+    for raw in paths or []:
+        f = Path(raw).expanduser().resolve()
+        if not f.is_file():  # Codex silently drops a missing -i path
+            raise XhError(f"--attach {raw}: not a file", EXIT_USAGE)
+        out.append(str(f))
+    return out
+
+
+MAX_SCAN = 5000  # entries examined per folder scan; bounds the work after a run
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: links and junctions on Windows
+
+
+def plain(st, kind) -> bool:
+    """A regular file or folder (kind = stat.S_ISREG / S_ISDIR) that is no link or junction."""
+    return kind(st.st_mode) and not getattr(st, "st_file_attributes", 0) & REPARSE
+
+
+def snapshot(folder, check=None) -> tuple:
+    """({path: (size, mtime_ns)} of the plain files under folder, truncated?). Never
+    follows links or junctions."""
+    seen, count = {}, 0
+    try:
+        if folder is None or not plain(os.lstat(folder), stat.S_ISDIR):
+            return seen, False
+    except OSError:
+        return seen, False
+    stack = [Path(folder)]
+    while stack:
+        try:
+            it = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with it:  # a stream: the cap and the watchdog apply inside huge folders too
+            for e in it:
+                count += 1
+                if count > MAX_SCAN:
+                    return seen, True
+                if check and count % 200 == 0:
+                    check()
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if plain(st, stat.S_ISDIR):
+                    stack.append(Path(e.path))
+                elif plain(st, stat.S_ISREG):
+                    seen[Path(e.path)] = (st.st_size, st.st_mtime_ns)
+    return seen, False
+
+
+def folder_id(folder):
+    try:
+        st = os.lstat(folder)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino) if plain(st, stat.S_ISDIR) else None
+
+
+def generated_dir(job: dict, session):
+    if job["target"] != "codex" or not session or not SESSION_ID_RE.match(str(session)):
+        return None
+    return codex_home(job.get("cwd")) / "generated_images" / str(session)
+
+
+def copy_exclusive(src: Path, folder: Path, sig=None, check=None) -> Path:
+    """Copy src into folder under a new name. Never replaces or follows anything: the
+    source must still be the plain file that was scanned (`sig`), and the destination
+    is created exclusively. A partial copy is removed, also when the watchdog stops it."""
+    st = os.lstat(src)
+    if not plain(st, stat.S_ISREG) or (sig and (st.st_size, st.st_mtime_ns) != sig):
+        raise OSError(f"{src} changed after it was found")
+    sfd = os.open(src, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    inp = os.fdopen(sfd, "rb")
+    ost = os.fstat(inp.fileno())
+    if (ost.st_dev, ost.st_ino) != (st.st_dev, st.st_ino) or not stat.S_ISREG(ost.st_mode):
+        inp.close()  # the opened file must be the one inspected, not a swapped-in link target
+        raise OSError(f"{src} changed while it was being copied")
+    with inp:
+        return _copy_into(inp, src, folder, check)
+
+
+def _copy_into(inp, src: Path, folder: Path, check) -> Path:
+    name, n = src.name, 1
+    while True:
+        dest = folder / name
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+        except FileExistsError:
+            name, n = f"{src.stem}-{n}{src.suffix}", n + 1
+            continue
+        try:
+            with os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = inp.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    if check:
+                        check()
+        except BaseException:
+            try:
+                os.unlink(dest)
+            except OSError:
+                pass
+            raise
+        return dest
+
+
+def collect_artifacts(job: dict, session, before: dict, check=None) -> tuple:
+    """Gather the files a task produced: Codex's generated images, copied out of
+    $CODEX_HOME/generated_images/<session>/ (originals stay), and files that are new or
+    changed in the outputs folder. `before` holds what was there before the run.
+    Returns (paths, errors, warnings, copied images)."""
+    out_dir = Path(job["out_dir"])
+    found, errors, warnings = [], [], []
+    gen = generated_dir(job, session)
+    if gen is not None:
+        images, cut = snapshot(gen, check)
+        if cut:
+            warnings.append(f"{gen} holds more than {MAX_SCAN} entries; some images were not examined")
+        known = before.get("gen_dir") == str(gen)
+        if not known and job.get("resume_session"):
+            # Resumed by a name the folder isn't keyed by: fall back to timestamps.
+            warnings.append("resumed by thread name: images are matched by time, not by a snapshot")
+        for f, sig in sorted(images.items()):
+            if f.parent != gen:
+                continue
+            if known and before["gen"].get(f) == sig:
+                continue  # an earlier turn's image
+            if not known and job.get("resume_session") and sig[1] < before["started_ns"]:
+                continue
+            if folder_id(out_dir) is None:
+                out_dir.mkdir(parents=True, exist_ok=True)
+            if before.get("out_id") and folder_id(out_dir) != before["out_id"]:
+                errors.append(f"{out_dir} was replaced during the run; images were not copied")
+                break
+            try:
+                found.append(copy_exclusive(f, out_dir, sig, check))
+            except OSError as e:
+                errors.append(f"could not copy {f} into {out_dir}: {e}")
+    images = list(found)
+    if before.get("out_id") and folder_id(out_dir) != before["out_id"]:
+        errors.append(f"{out_dir} was moved, replaced, or removed during the run; its files are not listed")
+        return [str(f) for f in found], errors, warnings, images
+    copied = set(found)
+    files, cut = snapshot(out_dir, check)
+    if cut or before.get("out_cut"):
+        warnings.append(f"{out_dir} holds more than {MAX_SCAN} entries; the artifact list may be incomplete")
+    old = before.get("out", {})
+    for f, sig in sorted(files.items()):
+        if f in copied or old.get(f) == sig:
+            continue
+        if f not in old and before.get("out_cut") and sig[1] < before["started_ns"]:
+            continue  # unseen only because the first scan was cut off
+        found.append(f)
+    return [str(f) for f in found], errors, warnings, images
+
+
 # ---------------------------------------------------------------------- supervisor
 
 
@@ -924,6 +1140,7 @@ def supervise(job_id: str) -> int:
         if copy_err:
             fields["error"] = copy_err  # scratch kept: it holds the only copy
         fields["ok"] = fields["exit_code"] == 0 and has and not fields.get("error")
+        fields["no_message"] = fields["exit_code"] == 0 and not has and not fields.get("error")
         if not fields["ok"] and not fields.get("error"):
             tail = se_path.read_text(encoding="utf-8", errors="replace")[-800:].strip()
             fields["error"] = tail or f"exit code {fields['exit_code']}" + ("" if has else ", no final message")
@@ -966,9 +1183,31 @@ def supervise(job_id: str) -> int:
     try:
         main_step = "task" if job["kind"] == "task" else "review"
         prompt = (jdir / "prompt.txt").read_text(encoding="utf-8") if (jdir / "prompt.txt").exists() else None
+        media = job["kind"] == "task" and job.get("out_dir")
+        if media:
+            gen = generated_dir(job, job.get("resume_session"))
+            out_snap, out_cut = snapshot(job["out_dir"], check_stop)
+            before = {"out": out_snap, "out_cut": out_cut, "out_id": folder_id(job["out_dir"]),
+                      "gen_dir": str(gen) if gen else None, "gen": snapshot(gen, check_stop)[0],
+                      "started_ns": time.time_ns() - 2_000_000_000}  # coarse filesystem clocks
         r = run_step(main_step, prompt, "result")
         ok = r.pop("ok")
+        no_message = r.pop("no_message", False)
         final.update(r)
+        if media:
+            final["artifacts"], errs, warns, images = collect_artifacts(job, r.get("session"), before, check_stop)
+            if errs:
+                final["artifact_errors"] = errs
+            if warns:
+                final["artifact_warnings"] = warns
+            if no_message and images and not errs:
+                # An image-only answer is a normal outcome, not a failure. Only this
+                # session's images count: a shared --out may hold other jobs' files.
+                ok = True
+                final.pop("error", None)
+                (jdir / "result.md").write_text("(no text answer; see artifacts)\n", encoding="utf-8")
+            elif errs and ok:
+                ok, final["error"] = False, errs[0]
         final["status"] = "succeeded" if ok else "failed"
         review_text = (jdir / "result.md").read_text(encoding="utf-8", errors="replace") if ok else ""
         if ok and job.get("fix") and not claude_native:
@@ -1074,7 +1313,8 @@ def resolve_session(target: str, value: str) -> str:
         if prev["target"] != target:
             raise XhError(f"job {value} ran {prev['target']}, not {target}", EXIT_USAGE)
         if prev.get("kind") == "review" or prev.get("ephemeral") or not prev.get("session"):
-            raise XhError(f"job {value} has no resumable session (reviews are ephemeral)", EXIT_USAGE)
+            raise XhError(f"job {value} has no resumable session: reviews and --ephemeral tasks are not "
+                          "saved, and a job that failed before starting has none", EXIT_USAGE)
         return prev["session"]
     return value
 
@@ -1109,6 +1349,11 @@ def create_job(a, kind: str, prompt) -> dict:
     else:
         job.update(ephemeral=a.ephemeral,
                    resume_session=resolve_session(a.target, a.resume) if a.resume else None)
+        # Every task has an outputs folder: --out, or the job's own artifacts/.
+        out_dir = Path(a.out).expanduser().resolve() if a.out else jdir / "artifacts"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        job.update(attachments=a.attachments, out_dir=str(out_dir), write_out=bool(a.out))
+        prompt = media_preamble(a.target, a.attachments, str(out_dir) if a.out else None, a.sandbox) + prompt
     if prompt is not None:
         (jdir / "prompt.txt").write_text(prompt, encoding="utf-8")
     save_job(job)
@@ -1167,6 +1412,9 @@ def cmd_review(a) -> int:
 
 def cmd_task(a) -> int:
     a.sandbox = a.sandbox or ("workspace-write" if a.write else "read-only")
+    a.attachments = resolve_attachments(a.attach)
+    if a.out and Path(a.out).exists() and not Path(a.out).is_dir():
+        raise XhError(f"--out {a.out}: not a folder", EXIT_USAGE)
     job = create_job(a, "task", read_prompt(a))
     return after_start(job, a)
 
@@ -1200,6 +1448,12 @@ def render_result(job: dict, as_json: bool) -> str:
         head += f"\nfix: {job['fix_status']} (details: xh.py result {job['id']} --fix-report)"
     if job.get("posted"):
         head += f"\nposted: {job['posted']}"
+    if job.get("artifacts"):
+        head += "\nartifacts:" + "".join(f"\n  {f}" for f in job["artifacts"])
+    for e in job.get("artifact_errors") or []:
+        head += f"\nartifact error: {e}"
+    for w in job.get("artifact_warnings") or []:
+        head += f"\nartifact warning: {w}"
     return head + ("\n\n" + text.strip() if text.strip() else "")
 
 
@@ -1237,7 +1491,8 @@ def cmd_result(a) -> int:
 
 def summary(job: dict) -> dict:
     keys = ("id", "target", "kind", "status", "label", "cwd", "created", "ended", "session",
-            "exit_code", "error", "reason", "hint", "cost_usd", "mode", "pr", "fix_status", "posted")
+            "exit_code", "error", "reason", "hint", "cost_usd", "mode", "pr", "fix_status", "posted",
+            "out_dir", "artifacts", "artifact_errors", "artifact_warnings")
     out = {k: job.get(k) for k in keys if job.get(k) is not None}
     if job.get("owner"):
         o = job["owner"]
@@ -1398,6 +1653,11 @@ def main(argv=None) -> int:
                    help="explicit sandbox; 'inherit' uses the target's own config")
     p.add_argument("--resume", metavar="JOB_OR_SESSION", help="continue an earlier task's session")
     p.add_argument("--ephemeral", action="store_true", help="do not persist the session")
+    p.add_argument("--attach", action="append", metavar="FILE",
+                   help="give the agent a file (repeatable); Codex gets images as image input")
+    p.add_argument("--out", metavar="DIR",
+                   help="folder for files the agent creates and for collected generated images "
+                        "(default: the job's artifacts folder)")
     p.set_defaults(fn=cmd_task)
 
     p = sub.add_parser("wait", help="wait for a job; exit 0 done, 1 failed, 3 still running")

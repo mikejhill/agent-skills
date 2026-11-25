@@ -20,7 +20,10 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
    sometimes, and that this is not consistently proven.
 6. A skill, not a plugin: progressive disclosure, no hooks, no session environment
    writes, harness-neutral layout, stdlib-only Python.
-7. Thin over the CLIs: `codex exec` and `codex exec review`, `claude -p`. Pass models,
+7. Files and images both ways (operator, 2026-11-25): the caller can hand the other
+   agent images and files, have Codex generate images, and get the produced files back
+   at a known path.
+8. Thin over the CLIs: `codex exec` and `codex exec review`, `claude -p`. Pass models,
    efforts, and extra flags through unchanged, so CLI updates don't break the skill.
 
 ## Requirements
@@ -31,6 +34,7 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
 - Posting review results to GitHub or GitLab (`--post`) is a common feature for every target.
 - Document that the benefit of cross-model review is unproven.
 - No process outlives its job, on Windows and POSIX.
+- "I would like to be able to use Codex from Claude in order to build images, among other multimodal features." (operator, 2026-11-25)
 
 ## Design decisions
 
@@ -54,6 +58,17 @@ Codex plugin for Claude Code (`openai/codex-plugin-cc`, unmaintained since 2026-
   `--post`. Claude's native review gets unrestricted Bash (its pipelines need it), so it is
   not a hard read-only guarantee; prompt reviews are. Tasks are
   read-only unless `--write`. No `--trust` or bypass flags.
+- **Media through the CLIs, not around them** (2026-11-25). Inputs: Codex `-i` for
+  images, ended with `--` because `-i` is variadic, and a prompt preamble with absolute
+  paths for everything else (Claude Code's Read tool views images). Outputs: Codex's
+  image tool saves to `$CODEX_HOME/generated_images/<thread_id>/` from outside the
+  model's sandbox, and `--json` carries no image event, so the supervisor copies that
+  folder's new files after the run instead of asking the model to copy them (which
+  needed sandbox escalation in a live test). Other files need `--write`, which makes
+  `--out` writable. Read-only stays read-only: a scoped Claude allow rule could not
+  override broader allows from the user's settings, so it was dropped for fail-closed
+  denies. Outputs are found by comparing before and after snapshots, not timestamps,
+  and copies are exclusive, link-free, and watched by the job's watchdog.
 - **One nesting level** (`CROSS_HARNESS_DEPTH`), to stop ping-pong loops.
 
 ## Upstream problems addressed
@@ -126,3 +141,7 @@ one `claude -p` per job with the prompt on stdin, which this skill follows.
 - 2026-11-22: [agent] Codex round 2: inline scratch-path validation (absolute base, no links, resolved path inside root) and the remote-tracking fetch of PR heads, both previously supplied by the removed instruction reference.
 - 2026-11-22: [agent] Codex round 3: the review-clone procedure is now fully self-contained. It covers per-OS scratch roots with trust checks, host-specific PR/MR refspecs, the `KEEP` retention marker, and the unique-work check before removal.
 - 2026-11-22: [agent] Codex round 4: replaced the inline scratch-storage policy with composition. Clones go wherever the user's scratch rules say, preferring a worktree of their clone, and otherwise the agent asks. The skill keeps only review-specific steps: remote-tracking PR/MR fetch, a HEAD-matches-ref check each round, and unique-work checks (including submodules) before removing what it created.
+- 2026-11-25: [operator] "I would like to be able to use Codex from Claude in order to build images, among other multimodal features. Does our cross-harness skill support images and other files or media as input and output? If not, please design an effective solution and implement it." [agent] It did not: prompts were text-only and only the final message came back. Probed codex-cli 0.170.0 on Windows: `-i/--image` is variadic and swallows a following `-` or prompt, and silently ignores missing files; `exec resume` accepts `-i`; `image_generation` is a stable, default-on feature; generated PNGs land in `generated_images/<thread_id>/` even under read-only, and the `--json` stream has no image event. Added `task --attach` and `--out`, automatic collection of Codex's generated images, an `artifacts` result field, `references/media.md`, and smoke tests.
+- 2026-11-25: [agent] Live check on Windows: attach, resume, and `--out` worked; an image-only answer was reported as failed, and Codex's Windows `workspace-write` sandbox needed escalation to write. Astra review (9 findings) and fixes: read-only Claude keeps full write denies (no scoped allow); image-only answers succeed; exclusive, non-replacing copies with errors reported; snapshot-based output detection with a scan cap and watchdog checks; comma paths listed instead of `-i`; `--add-dir` instead of replacing writable roots, and no change under `--sandbox inherit`; TOML-safe paths.
+- 2026-11-25: [agent] Astra round 2 (10 findings, all addressed): copies recheck the outputs folder and source identity and are created 0o666; scans count every entry, skip junctions, and warn when cut off; copies check the watchdog per chunk; `--add-dir` on the parent `exec` for resume instead of replacing writable roots; inherit-mode prompts name `--out`; thread-name resumes fall back to timestamps with a warning; docs say other files need `--write` and `--out`.
+- 2026-11-25: [agent] Astra round 3 (7 findings). Fixed: the source image is opened without following links and checked by identity; the outputs folder's identity is checked before listing its files; scans stream folder entries; a cut-off first scan doesn't make old files look new; only this session's copied images make an empty answer succeed; a relative `CODEX_HOME` resolves against `--cwd`. Declined: binding the destination to a directory handle. Swapping `--out` mid-run needs an agent that can write outside its sandbox, Windows has no portable `dir_fd`, and the identity check already catches a replaced folder. Stopped after this round: findings had narrowed to races against the agent itself.
