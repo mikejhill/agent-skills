@@ -12,10 +12,10 @@ Codex reads Agent Plugins 1.0 and keeps OpenAI-only settings in the `com.openai`
 | `apps` | Path to an `.app.json` mapping registered apps to MCP servers |
 | `hooks` | Path, paths, or inline hook objects. Replaces default discovery of `hooks/hooks.json`. |
 | `onboardingSkill` | Path to a packaged `SKILL.md` run after install |
-| `auth` | MCP authentication, since 1.0 `mcp.json` has no credential fields |
 
 - `.codex-plugin/plugin.json` is the older Codex manifest. Codex uses it only when the root manifest has no `extensions.com.openai`. Do not create one for new plugins; remove it when migrating, or keep it identical in name and version.
 - Skills: `skills/<name>/SKILL.md`. MCP: root `mcp.json`, with `type` per server. Codex lists `stdio` and `streamable-http`, not `sse`.
+- MCP authentication (OAuth or API keys) goes on the server entry in `mcp.json`, as `mcpServers.<name>.extensions["com.openai"].auth`, not in `plugin.json`. Other clients ignore that namespace.
 - Plugins with hooks work when installed manually but are not eligible for the public directory (2026-11).
 
 ## Marketplace
@@ -36,5 +36,7 @@ codex plugin marketplace add https://github.com/<owner>/<repo>.git --sparse .age
 codex plugin marketplace list
 codex plugin marketplace upgrade [<name>]
 ```
+
+Adding a marketplace only registers the catalog. Then test the plugin itself: open the plugin browser (`/plugins` in the CLI, or Plugins in the app), choose the local marketplace, install the entry, start a new session, and exercise one bundled skill and one MCP tool.
 
 Installed plugins are cached under `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`; local plugins use `local` as the version.

@@ -64,7 +64,7 @@ Plugins are plain directories, not archives.
 - `type` is `stdio`, `streamable-http`, or `sse` (deprecated; optional for clients, and Codex does not list it). Prefer `streamable-http` for remote servers.
 - `stdio`: `command` (required, one token: a bare name or `./` path), `args`, `env`, `cwd`. `env` must not set `PLUGIN_ROOT` or `PLUGIN_DATA`.
 - `streamable-http` and `sse`: `url` (absolute; HTTPS unless loopback; no userinfo or fragment), `headers`.
-- No OAuth or credential fields in 1.0. Never embed secrets; use a client extension's auth mechanism.
+- No OAuth or credential fields in 1.0. Never embed secrets; use a client extension's auth mechanism. Server entries may carry an `extensions` object for client-specific settings (Codex reads `extensions["com.openai"].auth` there). Any other field outside the selected transport makes clients skip the server.
 
 ## Variables
 

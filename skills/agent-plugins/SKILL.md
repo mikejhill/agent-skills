@@ -65,10 +65,10 @@ The checker reads every flavor it finds: manifest fields and names, `skills/` en
 
 ## Rules
 
-- **Name** a plugin in lowercase kebab-case, 64 characters or fewer, not starting with `claude-` or `anthropic-`. Use the same name in every manifest and every catalog entry; installs resolve by the catalog entry name.
+- **Name**: use the same name in every manifest and every catalog entry; installs resolve by the catalog entry name. Agent Plugins 1.0 allows `a-z`, `0-9`, `-`, and `.`. When Claude Code is also a target, use kebab-case without dots, not starting with `claude-` or `anthropic-`. Do not rename an existing plugin to fit a harness it does not target; the name is its install identity.
 - **Paths** start with `./`, use forward slashes, stay inside the plugin root, and never contain `..`. Harnesses copy plugins into a cache, so anything outside the root, including symlink targets, is missing after install.
 - **State** goes in the plugin data directory (`${PLUGIN_DATA}` or `${CLAUDE_PLUGIN_DATA}`), never under the plugin root. The root is replaced on every update.
-- **Secrets** never go in manifests, `env`, or `headers`. Use the harness's sensitive config or auth mechanism (Claude `userConfig` with `sensitive`, Codex `extensions.com.openai.auth`).
+- **Secrets** never go in manifests, `env`, or `headers`. Use the harness's sensitive config or auth mechanism (Claude `userConfig` with `sensitive`; Codex `extensions["com.openai"].auth` on the MCP server entry).
 - **MCP stdio** `command` is one executable token (a bare name or a `./` path), not a shell string. Put arguments in `args`.
 - **Versions**: pick one policy per catalog. Either bump `version` on every release, or omit it everywhere and let harnesses track commits. Never set it in both the manifest and the catalog entry.
 - **Freshness**: formats and harness support change monthly. When a behaviour matters, check the dated facts in the references against the linked docs, and record what you verified.

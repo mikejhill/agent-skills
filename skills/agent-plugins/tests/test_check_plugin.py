@@ -73,7 +73,7 @@ class CheckPluginTest(unittest.TestCase):
 
     def test_author_extra_member_is_error(self) -> None:
         write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "x", "author": {"name": "a", "org": "b"}}})
-        self.assertTrue(any("author.org" in m for m in self.errors()))
+        self.assertIn("author.org: only name, email, and url are allowed", self.errors())
 
     def test_legacy_root_manifest_warns(self) -> None:
         write(self.root, {"plugin.json": {"name": "x"}})
@@ -139,7 +139,7 @@ class CheckPluginTest(unittest.TestCase):
         write(plugin, good_plugin("x"))
         (self.root / "outside").mkdir()
         os.symlink(self.root / "outside", plugin / "skills" / "linked")
-        self.assertTrue(any("symlink points outside" in m for m in self.errors(plugin)))
+        self.assertTrue(any("resolves outside the root" in m for m in self.errors(plugin)))
 
     def test_catalogs_consistency_and_sources(self) -> None:
         write(self.root / "plugins" / "alpha", good_plugin("alpha"))
@@ -196,6 +196,86 @@ class CheckPluginTest(unittest.TestCase):
         warnings = "\n".join(self.warnings())
         self.assertIn("policy.installation", warnings)
         self.assertIn("category is expected", warnings)
+
+    def test_round2_mcp_rules(self) -> None:
+        files = good_plugin("x")
+        files["mcp.json"] = {"$schema": MCP, "mcpServers": {
+            "missing": {"type": "stdio", "command": "./bin/missing"},
+            "mixed": {"type": "stdio", "command": "node", "url": "https://example.com"},
+            "badurl": {"type": "streamable-http", "url": "https://[::1/mcp"},
+            "loop": {"type": "streamable-http", "url": "http://127.0.0.2/mcp"},
+            "hdr": {"type": "streamable-http", "url": "https://example.com/mcp",
+                    "headers": {"X-Tenant": "a", "x-tenant": "b", "bad name": "c"}},
+            "nullargs": {"type": "stdio", "command": "node", "args": None},
+            "ext": {"type": "stdio", "command": "node", "extensions": {"com.openai": {"auth": {}}}}}}
+        write(self.root, files)
+        errors = "\n".join(self.errors())
+        for text in ("mcpServers.missing.command './bin/missing': not found", "mcpServers.mixed.url: not a stdio field",
+                     "mcpServers.badurl.url is malformed", "duplicates another header", "'bad name' is not a valid",
+                     "mcpServers.nullargs.args"):
+            self.assertIn(text, errors)
+        for text in ("mcpServers.loop", "mcpServers.ext"):
+            self.assertNotIn(text, errors)
+
+    def test_null_core_fields_are_errors(self) -> None:
+        write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "x", "keywords": None, "author": None}})
+        errors = self.errors()
+        self.assertIn("'keywords' must be an array of strings", errors)
+        self.assertIn("'author' must be an object", errors)
+
+    def test_portable_skill_needs_description(self) -> None:
+        write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "x"},
+                          "skills/a/SKILL.md": "---\nname: a\n---\n"})
+        self.assertTrue(any("'description' is required" in m for m in self.errors()))
+
+    def test_manifest_free_claude_plugin(self) -> None:
+        write(self.root, {"hooks/hooks.json": "{}", "skills/a/SKILL.md": "---\ndescription: d\n---\n"})
+        self.assertEqual(self.errors(), [])
+
+    def test_claude_non_path_forms_and_legacy_paths(self) -> None:
+        write(self.root, {"SKILL.md": skill("x"), ".claude-plugin/plugin.json": {
+            "name": "x", "skills": ".", "mcpServers": "https://example.com/bundle.mcpb"}})
+        self.assertEqual(self.errors(), [])
+        legacy = self.root / "legacy"
+        write(legacy, {"plugin.json": {"name": "y", "agents": "./agents"}})
+        self.assertTrue(any("'./agents': not found" in m for m in self.errors(legacy)))
+
+    def test_codex_extension_paths(self) -> None:
+        write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "x",
+                                          "extensions": {"com.openai": {"onboardingSkill": "./skills/none/SKILL.md"}}}})
+        self.assertTrue(any("onboardingSkill" in m for m in self.errors()))
+
+    def test_remote_sources_and_root_source(self) -> None:
+        write(self.root, good_plugin("alpha"))
+        write(self.root, {".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+            {"name": "alpha", "source": "."},
+            {"name": "gh", "source": {"source": "github"}},
+            {"name": "odd", "source": {"source": "ftp", "url": "x"}}]}})
+        errors = "\n".join(self.errors())
+        self.assertIn("source.repo is required for github sources", errors)
+        self.assertIn("source type 'ftp' is not supported", errors)
+        self.assertNotIn("plugins[alpha]", errors)
+
+    def test_plugin_root_rejects_multi_segment(self) -> None:
+        write(self.root / "plugins" / "team" / "alpha", good_plugin("alpha"))
+        write(self.root, {".claude-plugin/marketplace.json": {
+            "name": "example-tools", "owner": {"name": "o"}, "metadata": {"pluginRoot": "./plugins"},
+            "plugins": [{"name": "alpha", "source": "team/alpha"}]}})
+        self.assertTrue(any("must start with './'" in m for m in self.errors()))
+
+    def test_codex_policy_types_and_metadata_union(self) -> None:
+        write(self.root / "plugins" / "alpha", good_plugin("alpha"))
+        write(self.root, {
+            ".agents/plugins/marketplace.json": {"name": "m", "plugins": [
+                {"name": "alpha", "source": "./plugins/alpha", "version": "1",
+                 "policy": {"installation": ["AVAILABLE"]}, "category": "Dev"}]},
+            ".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+                {"name": "alpha", "source": "./plugins/alpha", "version": "2"}]},
+            ".github/plugin/marketplace.json": {"name": "m", "plugins": []}})
+        warnings = "\n".join(self.warnings())
+        self.assertIn("policy.installation should be", warnings)
+        self.assertIn("policy.authentication should be", warnings)
+        self.assertIn("alpha: version differs between catalogs", warnings)
 
     def test_empty_folder_and_cli(self) -> None:
         self.assertTrue(any("no plugin manifest" in m for m in self.errors()))
