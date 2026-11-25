@@ -384,6 +384,27 @@ def _():
     assert job(jid)["status"] == "succeeded" and "see artifacts" in r.stdout, r.stdout
     jid = start("task", "-t", "codex", "NOMSG", env=env)  # no image and no text: still a failure
     run("wait", jid, "--timeout", "30", check=1, env=env)
+    out = TMP / "outs-nomsg"  # a written file is no evidence: only this session's images are
+    jid = start("task", "-t", "codex", "--write", "--out", str(out), "NOMSG", env=env)
+    run("wait", jid, "--timeout", "30", check=1, env=env)
+    assert job(jid)["artifacts"] == [str(out.resolve() / "chart.svg")]
+    saved = os.environ.get("CODEX_HOME")
+    os.environ["CODEX_HOME"] = "rel-home"
+    try:
+        assert xh.codex_home(str(WORK)) == WORK / "rel-home"  # relative to the child's cwd
+    finally:
+        if saved is None:
+            os.environ.pop("CODEX_HOME", None)
+        else:
+            os.environ["CODEX_HOME"] = saved
+    moved = TMP / "outs-moved"
+    moved.mkdir()
+    before = {"out": {}, "out_id": xh.folder_id(moved), "started_ns": 0}
+    moved.rename(TMP / "outs-moved-away")
+    moved.mkdir()
+    (moved / "planted.txt").write_text("x")
+    arts, errs, _, _ = xh.collect_artifacts({"target": "claude", "out_dir": str(moved)}, None, before)
+    assert arts == [] and "replaced" in errs[0], (arts, errs)
     folder = TMP / "excl"
     folder.mkdir()
     src = TMP / "excl-src.png"

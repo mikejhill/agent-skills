@@ -772,9 +772,12 @@ def _linux_pdeathsig():
 # -------------------------------------------------------------------------- media
 
 
-def codex_home() -> Path:
+def codex_home(cwd=None) -> Path:
+    """Codex's home as the child sees it: a relative CODEX_HOME is relative to --cwd."""
     env = os.environ.get("CODEX_HOME")
-    return Path(env) if env and Path(env).is_absolute() else Path.home() / ".codex"
+    if not env:
+        return Path.home() / ".codex"
+    return Path(env) if Path(env).is_absolute() else Path(cwd or os.getcwd()) / env
 
 
 def codex_image(path: str) -> bool:
@@ -836,23 +839,24 @@ def snapshot(folder, check=None) -> tuple:
     stack = [Path(folder)]
     while stack:
         try:
-            entries = list(os.scandir(stack.pop()))
+            it = os.scandir(stack.pop())
         except OSError:
             continue
-        for e in entries:
-            count += 1
-            if count > MAX_SCAN:
-                return seen, True
-            if check and count % 200 == 0:
-                check()
-            try:
-                st = e.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            if plain(st, stat.S_ISDIR):
-                stack.append(Path(e.path))
-            elif plain(st, stat.S_ISREG):
-                seen[Path(e.path)] = (st.st_size, st.st_mtime_ns)
+        with it:  # a stream: the cap and the watchdog apply inside huge folders too
+            for e in it:
+                count += 1
+                if count > MAX_SCAN:
+                    return seen, True
+                if check and count % 200 == 0:
+                    check()
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if plain(st, stat.S_ISDIR):
+                    stack.append(Path(e.path))
+                elif plain(st, stat.S_ISREG):
+                    seen[Path(e.path)] = (st.st_size, st.st_mtime_ns)
     return seen, False
 
 
@@ -867,7 +871,7 @@ def folder_id(folder):
 def generated_dir(job: dict, session):
     if job["target"] != "codex" or not session or not SESSION_ID_RE.match(str(session)):
         return None
-    return codex_home() / "generated_images" / str(session)
+    return codex_home(job.get("cwd")) / "generated_images" / str(session)
 
 
 def copy_exclusive(src: Path, folder: Path, sig=None, check=None) -> Path:
@@ -877,6 +881,17 @@ def copy_exclusive(src: Path, folder: Path, sig=None, check=None) -> Path:
     st = os.lstat(src)
     if not plain(st, stat.S_ISREG) or (sig and (st.st_size, st.st_mtime_ns) != sig):
         raise OSError(f"{src} changed after it was found")
+    sfd = os.open(src, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    inp = os.fdopen(sfd, "rb")
+    ost = os.fstat(inp.fileno())
+    if (ost.st_dev, ost.st_ino) != (st.st_dev, st.st_ino) or not stat.S_ISREG(ost.st_mode):
+        inp.close()  # the opened file must be the one inspected, not a swapped-in link target
+        raise OSError(f"{src} changed while it was being copied")
+    with inp:
+        return _copy_into(inp, src, folder, check)
+
+
+def _copy_into(inp, src: Path, folder: Path, check) -> Path:
     name, n = src.name, 1
     while True:
         dest = folder / name
@@ -886,7 +901,7 @@ def copy_exclusive(src: Path, folder: Path, sig=None, check=None) -> Path:
             name, n = f"{src.stem}-{n}{src.suffix}", n + 1
             continue
         try:
-            with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            with os.fdopen(fd, "wb") as out:
                 while True:
                     chunk = inp.read(1 << 20)
                     if not chunk:
@@ -907,7 +922,7 @@ def collect_artifacts(job: dict, session, before: dict, check=None) -> tuple:
     """Gather the files a task produced: Codex's generated images, copied out of
     $CODEX_HOME/generated_images/<session>/ (originals stay), and files that are new or
     changed in the outputs folder. `before` holds what was there before the run.
-    Returns (paths, errors, warnings)."""
+    Returns (paths, errors, warnings, copied images)."""
     out_dir = Path(job["out_dir"])
     found, errors, warnings = [], [], []
     gen = generated_dir(job, session)
@@ -935,14 +950,22 @@ def collect_artifacts(job: dict, session, before: dict, check=None) -> tuple:
                 found.append(copy_exclusive(f, out_dir, sig, check))
             except OSError as e:
                 errors.append(f"could not copy {f} into {out_dir}: {e}")
+    images = list(found)
+    if before.get("out_id") and folder_id(out_dir) != before["out_id"]:
+        errors.append(f"{out_dir} was moved, replaced, or removed during the run; its files are not listed")
+        return [str(f) for f in found], errors, warnings, images
     copied = set(found)
     files, cut = snapshot(out_dir, check)
-    if cut:
+    if cut or before.get("out_cut"):
         warnings.append(f"{out_dir} holds more than {MAX_SCAN} entries; the artifact list may be incomplete")
+    old = before.get("out", {})
     for f, sig in sorted(files.items()):
-        if f not in copied and before.get("out", {}).get(f) != sig:
-            found.append(f)
-    return [str(f) for f in found], errors, warnings
+        if f in copied or old.get(f) == sig:
+            continue
+        if f not in old and before.get("out_cut") and sig[1] < before["started_ns"]:
+            continue  # unseen only because the first scan was cut off
+        found.append(f)
+    return [str(f) for f in found], errors, warnings, images
 
 
 # ---------------------------------------------------------------------- supervisor
@@ -1163,7 +1186,8 @@ def supervise(job_id: str) -> int:
         media = job["kind"] == "task" and job.get("out_dir")
         if media:
             gen = generated_dir(job, job.get("resume_session"))
-            before = {"out": snapshot(job["out_dir"], check_stop)[0], "out_id": folder_id(job["out_dir"]),
+            out_snap, out_cut = snapshot(job["out_dir"], check_stop)
+            before = {"out": out_snap, "out_cut": out_cut, "out_id": folder_id(job["out_dir"]),
                       "gen_dir": str(gen) if gen else None, "gen": snapshot(gen, check_stop)[0],
                       "started_ns": time.time_ns() - 2_000_000_000}  # coarse filesystem clocks
         r = run_step(main_step, prompt, "result")
@@ -1171,13 +1195,14 @@ def supervise(job_id: str) -> int:
         no_message = r.pop("no_message", False)
         final.update(r)
         if media:
-            final["artifacts"], errs, warns = collect_artifacts(job, r.get("session"), before, check_stop)
+            final["artifacts"], errs, warns, images = collect_artifacts(job, r.get("session"), before, check_stop)
             if errs:
                 final["artifact_errors"] = errs
             if warns:
                 final["artifact_warnings"] = warns
-            if no_message and final["artifacts"] and not errs:
-                # An image-only answer is a normal outcome, not a failure.
+            if no_message and images and not errs:
+                # An image-only answer is a normal outcome, not a failure. Only this
+                # session's images count: a shared --out may hold other jobs' files.
                 ok = True
                 final.pop("error", None)
                 (jdir / "result.md").write_text("(no text answer; see artifacts)\n", encoding="utf-8")
