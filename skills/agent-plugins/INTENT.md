@@ -1,0 +1,28 @@
+# Intent
+
+Teach agents to package agent context (skills, agents, commands, hooks, MCP servers) as agent plugins and publish them through marketplaces, across the open Agent Plugins format, Claude Code's plugin format, and harness-specific extensions, without confusing one flavor for another.
+
+## Goals
+
+1. A plugin an agent builds with this skill installs and loads its components in every harness the author targets.
+2. The agent never confuses the flavors: the open Agent Plugins specification, Claude Code's plugin and marketplace format, and harness-specific formats and extensions (GitHub Copilot, Codex, and others) are kept distinct.
+3. Plugins are authored in library projects. Consumer projects are not pushed to add plugin manifests or marketplaces.
+4. Harness-neutral guidance comes first; harness-specific deltas are clearly separated and loaded only when that harness is a target.
+5. Facts that change fast (formats, paths, support per harness) are dated and point to the authoritative docs, so the skill can be refreshed.
+
+## Requirements
+
+- "I would also like to have skills which can support the creation of Agent Plugins."
+- "Plugins would typically be placed in library projects, rather than consumers. This slightly adjusts the use of them, since I would expect most projects will intentionally neglect them."
+- "There are multiple flavors of plugins and ways to attach them to marketplaces, such as the Agent Plugins specification as well as Claude's own specification. It's critical that this difference is captured."
+- "Within these, there are also harness-specific solutions, such as support for different Agent Plugins extensions across GitHub Copilot and other harnesses."
+- "Assess, build a strong understanding for the current state and expected target state of plugins and their various ecosystems, and then design and implement a cohesive skill solution."
+- Library standards apply: the skill stands alone and names no other skill; it stays in scope (packaging and distribution, not how to write the skills or agents inside a plugin); harness-neutral where possible, with harness-specific deltas separated; intent-first.
+
+## Log
+
+- 2026-11-25: Created. Operator asked for skills that support creating Agent Plugins, with the three caveats above.
+- 2026-11-25: [agent] Built as a separate skill, not a reference inside the library's agent-context standard. Reasons: plugins are packaging and distribution, a different subject from writing context; they matter only in library projects, so consumer setups can leave the skill out (caveat 1); the subject needs several references of its own (spec, per-harness deltas, marketplaces, library layout), which would bloat a writing-standards skill; and a skill must stand alone, so composition by capability works without naming each other.
+- 2026-11-25: [agent] Named `agent-plugins`: a noun phrase matching the subject and the open format's own name.
+- 2026-11-25: [agent] State researched on 2026-11-25. Agent Plugins 1.0.0 published 2026-08-06 (agent-plugins.org; maintainers from Amazon, Anysphere, Google, Microsoft, OpenAI, Vercel). Core is closed: root `plugin.json`, `skills/`, `mcp.json`; everything else lives in reverse-domain extension namespaces. No catalog format; distribution is client-owned. GA in VS Code, Copilot CLI and app on 2026-08-12; Codex reads it with `extensions.com.openai`. Claude Code is not a listed client and keeps its own `.claude-plugin/` format and the richest marketplace (source types, strict mode, version pinning). Copilot and Codex also read Claude-format catalogs or manifests. Target state: 1.0 core grows only on cross-client need; agents, commands, hooks, and rules stay extensions for now.
+- 2026-11-25: [agent] Default recommendation: Agent Plugins 1.0 core plus a `.claude-plugin/plugin.json` overlay when Claude Code is a target, because one root manifest cannot satisfy both (1.0 has a closed field set; Claude reads only `.claude-plugin/`). Added `scripts/check_plugin.py` for the deterministic checks: manifest fields, names, paths, MCP config, and consistency across catalogs.
