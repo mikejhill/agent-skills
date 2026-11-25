@@ -4,7 +4,7 @@ description: >-
   Puts generated documents, reports, notes, specs, scripts, and other transient
   files in a dated, structured _meta/ folder at the projects root. Use when
   creating any of these that does not belong in a project's own files or a
-  location the user named.
+  location the user named outside _meta/, or when the user names _meta/.
 ---
 
 # Meta workspace
@@ -29,7 +29,7 @@ Use the projects root you know: the user's instructions, an existing `_meta/`, o
 ├── files/      # supporting material: downloads, exports, data, images, attachments
 ├── notes/      # informal working notes: plans, ideas, findings, research, meeting notes
 ├── reports/    # finished output for reading: status reports, reviews, audits, analyses, comparisons
-├── scratch/    # disposable experiments and intermediate output, safe to delete at any time
+├── scratch/    # disposable experiments and intermediate output, deletable once finished
 ├── scripts/    # runnable automation and one-off scripts, often across projects
 └── specs/      # designs, requirements, and proposals for work not yet in a project
 ```
@@ -45,6 +45,7 @@ Every file and folder you add under the top-level folders is named `YYYY-MM-DD-<
 - Label: two to five lowercase-kebab-case words that say what it is about: `2026-11-25-uv-migration-plan.md`, `2026-11-25-pull-all-projects.ps1`.
 - The date is the creation date. Keep it when you later edit the item.
 - Before creating, check for an item on the same subject. Update it if it is the same piece of work; otherwise choose a more specific label.
+- Create new files exclusively, failing if the path exists, because other sessions write here too. On a clash, choose a more specific label.
 - Only `_meta/README.md`, the top-level folders themselves, and paths a tool requires are undated.
 
 ## Subfolders
