@@ -1,40 +1,70 @@
 ---
 name: meta-workspace
 description: >-
-  Puts cross-project and supervisory work (plans, notes, specs, reports,
-  scripts that span projects) in a _meta/ folder at the projects root. Use when
-  creating a document or script that is not tied to a single project's
-  codebase.
+  Puts generated documents, reports, notes, specs, scripts, and other transient
+  files in a dated, structured _meta/ folder at the projects root. Use when
+  creating any of these that does not belong in a project's own files or a
+  location the user named outside _meta/, or when the user names _meta/.
 ---
 
 # Meta workspace
 
-Work that spans or orchestrates projects lives in `_meta/` at the projects root (the folder that holds the individual project folders, such as `~/Projects`). The underscore sorts it first in listings on every OS without hiding it.
+`<projects-root>/_meta/` is the default home for content an agent generates that is not part of a project's own files: documents, reports, notes, specs, scripts, and supporting files. The projects root is the folder that holds the individual project folders, such as `~/Projects`. The underscore sorts it first without hiding it.
+
+Treat everything here as transient working material. It is dated so the user can see at a glance how stale it is, and it loses relevance quickly. Nothing here is a source of truth: anything that must last moves into the project it concerns.
+
+## Where content goes
+
+1. A location the user named.
+2. A clearly more appropriate home, such as a project's own docs, code, or tests when the content ships with that project.
+3. Otherwise `_meta/`, even when the content concerns only one project.
+
+Use the projects root you know: the user's instructions, an existing `_meta/`, or the folder that holds the user's project checkouts. A checkout's parent is only a candidate, because worktrees and review clones often sit in temporary folders; never create `_meta/` there. If the root cannot be established, ask once. If it is not reachable from this session, put the file where the session can deliver it and tell the user.
+
+## Structure
 
 ```text
 <projects-root>/_meta/
-├── README.md   # purpose and a table of subfolders
-├── notes/      # plans, ideas, observations across projects
-├── specs/      # designs and requirements for work not yet in a project
-├── reports/    # status reports, summaries, audits
-└── scripts/    # automation that operates across projects
+├── README.md   # purpose of _meta/ and a table of its folders
+├── files/      # supporting material: downloads, exports, data, images, attachments
+├── notes/      # informal working notes: plans, ideas, findings, research, meeting notes
+├── reports/    # finished output for reading: status reports, reviews, audits, analyses, comparisons
+├── scratch/    # disposable experiments and intermediate output, deletable once finished
+├── scripts/    # runnable automation and one-off scripts, often across projects
+└── specs/      # designs, requirements, and proposals for work not yet in a project
 ```
 
-## When it applies
+- Pick the folder by what the content is, not which project it concerns. A finished write-up is a report; working thoughts toward it are notes; a script that produced it is a script; its raw data is files.
+- If `_meta/` or a folder is missing, create it. Create `README.md` with the table above if it is missing. If it exists, add rows for any missing standard folders and keep existing rows and descriptions.
+- Conform to these folders. Add another top-level folder only when content recurs that clearly fits none of them, and add it to the `README.md` table with a one-line purpose.
 
-Use `_meta/` when the work concerns several projects, tracks or reports on projects rather than implementing inside one, automates project-level tasks, or specifies work that has no project folder yet.
+## Naming
 
-## Rules
+Every file and folder you add under the top-level folders is named `YYYY-MM-DD-<label>`, using today's local date (ISO 8601).
 
-- Never put this work inside one project's repository, at the projects root itself, or in a hidden folder such as `.meta/` or `.docs/`.
-- If `_meta/` is missing, create it with the four subfolders and a `README.md` (a `# _meta` heading, one line of purpose, and a table of subfolders), then add the file.
-- Use the standard subfolders first. Add another lowercase-kebab-case subfolder (such as `templates/`) only when nothing fits. Nest at most one level inside a standard subfolder.
-- Name files in lowercase-kebab-case: `q2-migration-plan.md`, `update-all-projects.ps1`.
+- Label: two to five lowercase-kebab-case words that say what it is about: `2026-11-25-uv-migration-plan.md`, `2026-11-25-pull-all-projects.ps1`.
+- The date is the creation date. Keep it when you later edit the item.
+- Before creating, check for an item on the same subject. Update it if it is the same piece of work; otherwise choose a more specific label.
+- Create new files exclusively, failing if the path exists, because other sessions write here too. On a clash, choose a more specific label.
+- Only `_meta/README.md`, the top-level folders themselves, and paths a tool requires are undated.
+
+## Subfolders
+
+Use a subfolder inside a top-level folder when a piece of work has several files, such as a report with its data and charts, or a spec with diagrams. Name the subfolder and every file in it with the same convention, and keep nesting shallow. Inside a dated folder, keep any file or directory path a tool requires unchanged, such as `pyproject.toml` or `src/main/java/`.
+
+```text
+reports/2026-11-25-dependency-audit/
+├── 2026-11-25-dependency-audit.md
+└── 2026-11-25-outdated-packages.csv
+```
 
 ## Examples
 
 | Request | Location |
 | --- | --- |
-| Spec for a CLI tool that has no project yet | `_meta/specs/cli-tool-name.md` |
-| Migration plan affecting three projects | `_meta/notes/migration-plan.md` |
-| Script that pulls every project | `_meta/scripts/update-all-projects.ps1` |
+| Summarize open PRs across my repos | `_meta/reports/2026-11-25-open-pr-summary.md` |
+| Plan migrating all projects to uv | `_meta/notes/2026-11-25-uv-migration-plan.md` |
+| Spec a CLI tool that has no project yet | `_meta/specs/2026-11-25-backup-cli/` with its files |
+| Script that pulls every project | `_meta/scripts/2026-11-25-pull-all-projects.ps1` |
+| Try a library API before using it | `_meta/scratch/2026-11-25-httpx-retry-test/` |
+| Add a section to a project's README | The project's README, not `_meta/` |

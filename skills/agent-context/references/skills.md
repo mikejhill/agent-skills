@@ -66,11 +66,10 @@ Keep in `SKILL.md` only what every run needs, and aim for 200 lines or fewer (th
 | --- | --- |
 | Scratch output tied to a workspace | `<workspace>/.tmp/<skill-name>/` (gitignored) |
 | Temp output with no workspace, or for the user | `<system-temp>/agent-skills/<skill-name>/` (Unix: `agent-skills-<uid>`) |
-| Working directories with no workspace (clones, verification) | `<system-temp>/agent-skills/scratch/<kind>-<YYYYMMDD-HHMMSS>-<slug>/` (Unix: `agent-skills-<uid>`), removed when the task ends unless it holds unique work |
 | User configuration | `~/.config/agent-skills/<skill-name>/` |
 | Cache and persistent state | `<user-cache>/agent-skills/<skill-name>/` |
 
-Name ephemeral files `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` using local time, for example `report-20261122-175433-auth-flow.md`. Create them exclusively and never overwrite. Never write inside the skill folder at run time. For per-OS resolution and creation rules, read [paths.md](paths.md).
+Name ephemeral files `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>` using local time, for example `report-20261122-175433-auth-flow.md`. Create them exclusively and never overwrite. A destination with its own naming rules, such as a user-defined home for generated documents, replaces the name format; new files are still created exclusively, and only its update rule may allow editing an existing item. Never write inside the skill folder at run time. For per-OS resolution and creation rules, read [paths.md](paths.md).
 
 ## Scripts
 
