@@ -6,15 +6,13 @@
 | --- | --- | --- | --- |
 | Workspace scratch | `<workspace>\.tmp\<skill-name>\` | `<workspace>/.tmp/<skill-name>/` | same as macOS |
 | System temp | `%TEMP%\agent-skills\<skill-name>\` | `$TMPDIR/agent-skills-<uid>/<skill-name>/` | `${TMPDIR:-/tmp}/agent-skills-<uid>/<skill-name>/` |
-| Agent scratch | `%TEMP%\agent-skills\scratch\` | `$TMPDIR/agent-skills-<uid>/scratch/` | `${TMPDIR:-/tmp}/agent-skills-<uid>/scratch/` |
 | Config | `%XDG_CONFIG_HOME%` or `%USERPROFILE%\.config`, then `\agent-skills\<skill-name>\` | `${XDG_CONFIG_HOME:-~/.config}/agent-skills/<skill-name>/` | same as macOS |
 | Cache and state | `%LOCALAPPDATA%\agent-skills\<skill-name>\` | `~/Library/Caches/agent-skills/<skill-name>/` | `${XDG_CACHE_HOME:-~/.cache}/agent-skills/<skill-name>/` |
 
 Choose by lifetime and audience:
 
 - **Workspace scratch** holds intermediate results, logs, and checkpoints for work in one project. Ensure `.tmp/` is gitignored before writing there.
-- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
-- **Agent scratch** holds working directories outside any workspace, such as a clone to review a branch or a verification directory. One directory per use, named `<kind>-<YYYYMMDD-HHMMSS>-<slug>`, removed when the task ends unless it holds unique work (see [Rules](#rules)). Before creating or removing anything there, check that no path component from the temp root down to the task directory (`agent-skills`, `scratch`, the task directory) is a symlink or junction, and that the resolved task directory sits inside the validated root. Worktrees, caches, and job state are not scratch. If the user's instructions define more for this root, such as retention markers or a sweep of stale entries, follow them.
+- **System temp** holds output for the user with no project home, such as a handoff, an export, or a one-off report. The OS may delete it. If the user's instructions name a home for generated documents or reports, use that instead. On Unix the parent is per user (`agent-skills-<uid>`, from `id -u`), because `/tmp` is shared: create it with mode `0700`, and before reuse verify it is a real directory (not a symlink), owned by you, and grants no group or other access (mode `0700`). Otherwise stop.
 - **Config** honors `XDG_CONFIG_HOME` on every OS. It holds settings and credentials the user creates. Scripts read it. Agents never write credentials. See [cli.md](cli.md).
 - **Cache and state** holds data a script can rebuild, such as probe results, broker state, or downloads.
 
