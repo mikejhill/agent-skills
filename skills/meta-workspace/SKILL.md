@@ -45,7 +45,7 @@ Every file and folder you add under the top-level folders is named `YYYY-MM-DD-<
 - Label: two to five lowercase-kebab-case words that say what it is about: `2026-11-25-uv-migration-plan.md`, `2026-11-25-pull-all-projects.ps1`.
 - The date is the creation date. Keep it when you later edit the item.
 - Before creating, check for an item on the same subject. Update it if it is the same piece of work; otherwise choose a more specific label.
-- Only `_meta/README.md` and the top-level folders themselves are undated.
+- Only `_meta/README.md`, the top-level folders themselves, and file names a tool requires are undated.
 
 ## Subfolders
 
