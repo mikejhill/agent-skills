@@ -36,7 +36,10 @@ CORE_FIELDS = {"$schema", "name", "version", "description", "author", "homepage"
                "license", "keywords", "extensions"}
 COMPONENT_KEYS = {"skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "outputStyles"}
 CLAUDE_REPLACING_KEYS = {"skills", "commands", "agents", "hooks", "outputStyles", "themes"}
-CLAUDE_LAYOUT = ("skills", "commands", "agents", "hooks/hooks.json", ".mcp.json", ".lsp.json", "output-styles")
+CLAUDE_LAYOUT = ("skills", "commands", "agents", "hooks/hooks.json", ".mcp.json", ".lsp.json", "output-styles",
+                 "SKILL.md")
+COPILOT_MANIFESTS = ("plugin.json", ".github/plugin/plugin.json", ".claude-plugin/plugin.json", ".plugin/plugin.json")
+CODEX_MANIFESTS = ("plugin.json", ".codex-plugin/plugin.json")
 CODEX_PATH_KEYS = ("apps", "onboardingSkill", "hooks")
 CLAUDE_INLINE_KEYS = {"commands", "hooks", "mcpServers", "lspServers"}
 NAME_10 = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
@@ -57,6 +60,7 @@ CATALOGS = {
     "claude": Path(".claude-plugin/marketplace.json"),
     "copilot": Path(".github/plugin/marketplace.json"),
     "copilot-root": Path("marketplace.json"),
+    "copilot-plugin": Path(".plugin/marketplace.json"),
     "codex": Path(".agents/plugins/marketplace.json"),
 }
 # Required locator fields for remote sources, per catalog flavor.
@@ -65,6 +69,7 @@ REMOTE_SOURCES = {
                "archive": ("url",), "command": ("command",)},
     "copilot": {"github": ("repo",), "url": ("url",)},
     "copilot-root": {"github": ("repo",), "url": ("url",)},
+    "copilot-plugin": {"github": ("repo",), "url": ("url",)},
     "codex": {"url": ("url",), "git-subdir": ("url", "path"), "npm": ("package",)},
 }
 CODEX_INSTALL = {"AVAILABLE", "INSTALLED_BY_DEFAULT", "NOT_AVAILABLE"}
@@ -95,6 +100,10 @@ def frontmatter_scalar(front: str, key: str) -> str | None:
                 if nxt.strip() and not nxt[:1].isspace():
                     break
                 block.append(nxt.strip())
+            first = next((x for x in block if x), "")
+            if rest[:1] not in ("|", ">") and (first.startswith("- ") or first == "-"
+                                               or re.match(r"[^'\"\s][^:]*:(\s|$)", first)):
+                return None  # a nested sequence or mapping, not a string
             text = " ".join(x for x in block if x)
             return text or None
         if rest[0] in "'\"":
@@ -109,6 +118,11 @@ def frontmatter_scalar(front: str, key: str) -> str | None:
             return None  # a collection or null, not a string
         return value
     return None
+
+
+def valid_skill_name(name: str) -> bool:
+    return (0 < len(name) <= 64 and name == name.lower() and not name.startswith("-")
+            and not name.endswith("-") and "--" not in name and all(c.isalnum() or c == "-" for c in name))
 
 
 def is_loopback(host: str) -> bool:
@@ -127,6 +141,7 @@ class Checker:
         self.plugins: dict[Path, dict[str, str]] = {}
         self.catalogs: dict[str, dict] = {}
         self.outside: set[Path] = set()
+        self.claude_data: dict[Path, dict] = {}
 
     # -- helpers -----------------------------------------------------------
     def add(self, level: str, path: Path, message: str) -> None:
@@ -177,7 +192,8 @@ class Checker:
             return None
         return data
 
-    def check_rel_path(self, base: Path, value: str, where: Path, what: str) -> Path | None:
+    def check_rel_path(self, base: Path | None, value: str, where: Path, what: str) -> Path | None:
+        """Check ./ path syntax; with a base, also containment and existence."""
         if "\\" in value:
             self.error(where, f"{what} {value!r}: use forward slashes")
             return None
@@ -186,6 +202,8 @@ class Checker:
             return None
         if not value.startswith("./"):
             self.error(where, f"{what} {value!r}: must start with './'")
+            return None
+        if base is None:
             return None
         target = base / value
         if not self.inside(base, target):
@@ -250,6 +268,10 @@ class Checker:
             remember("plugin.json", root_data)
 
         mcp = d / "mcp.json"
+        if mcp.exists() and not mcp.is_file():
+            self.error(mcp, "mcp.json must be a file; clients drop MCP for this plugin")
+        if (d / "skills").exists() and not (d / "skills").is_dir():
+            self.error(d / "skills", "skills must be a folder; clients drop skills for this plugin")
         if mcp.is_file():
             if spec_version:
                 data = self.load(mcp, d)
@@ -265,13 +287,25 @@ class Checker:
             data = self.load(claude_manifest, d)
             if data is not None:
                 info["claude"] = "yes"
+                self.claude_data[d] = data
                 self.check_manifest_claude(d, claude_manifest, data)
                 remember(".claude-plugin/plugin.json", data)
+        if mcp.is_file() and not (d / ".mcp.json").exists() and info.get("claude") and \
+                "mcpServers" not in (self.claude_data.get(d) or {}):
+            self.warn(d, "Claude Code does not read the Agent Plugins mcp.json; declare servers in .mcp.json or "
+                         "mcpServers in .claude-plugin/plugin.json")
         if claude_dir.is_dir() and self.inside(d, claude_dir):
             extra = sorted(p.name for p in claude_dir.iterdir() if p.name not in {"plugin.json", "marketplace.json"})
             if extra:
                 self.warn(claude_dir, f"only manifests belong in .claude-plugin/; move {', '.join(extra)} "
                                       "to the plugin root")
+
+        gh_manifest = d / ".github" / "plugin" / "plugin.json"
+        if gh_manifest.is_file() and root_data is None:
+            data = self.load(gh_manifest, d)
+            if data is not None:
+                self.check_manifest_legacy(d, gh_manifest, data)
+                remember(".github/plugin/plugin.json", data)
 
         open_manifest = d / ".plugin" / "plugin.json"
         if open_manifest.is_file():
@@ -461,6 +495,11 @@ class Checker:
             cwd = server["cwd"]
             if not isinstance(cwd, str) or "\\" in cwd or not CWD.fullmatch(cwd) or ".." in cwd.split("/"):
                 self.error(path, f"{where}.cwd must be './...', '${{PLUGIN_ROOT}}[/...]', or '${{PLUGIN_DATA}}[/...]'")
+            elif not cwd.startswith("${PLUGIN_DATA}"):
+                rel = "./" + cwd[len("${PLUGIN_ROOT}"):].lstrip("/") if cwd.startswith("${PLUGIN_ROOT}") else cwd
+                target = d / rel
+                if not self.inside(d, target) or not target.is_dir():
+                    self.error(path, f"{where}.cwd {cwd!r} is not a folder inside the plugin")
 
     def check_http(self, path: Path, where: str, server: dict) -> None:
         url = server.get("url")
@@ -534,9 +573,9 @@ class Checker:
                     continue
                 if key == "mcpServers" and value.startswith("https://"):
                     continue
-                if d is None:
-                    continue
                 target = self.check_rel_path(d, value, path, f"{prefix}{key}")
+                if key == "agents" and target is not None and not target.is_file():
+                    self.error(path, f"{prefix}agents {value!r}: list agent .md files; a folder is not accepted")
                 if key == "mcpServers" and target is not None and target.name == "mcp.json":
                     self.warn(path, "mcpServers points at the Agent Plugins mcp.json; its schema and "
                                     "variables differ. Use .mcp.json or inline servers")
@@ -549,7 +588,11 @@ class Checker:
             if not self.inside(d, child) or not child.is_dir():
                 continue
             skill_md = child / "SKILL.md"
-            if not skill_md.is_file():
+            try:
+                exact = "SKILL.md" in os.listdir(child)
+            except OSError:
+                exact = False
+            if not exact:
                 self.warn(child, "no SKILL.md directly inside; clients skip it (no recursive search)")
                 continue
             if not self.contained(d, skill_md):
@@ -569,10 +612,13 @@ class Checker:
                     self.error(skill_md, "frontmatter 'name' is required by Agent Skills; portable clients skip it")
             elif name != child.name:
                 report(skill_md, f"name {name!r} must equal the folder name {child.name!r}")
-            elif portable and (len(name) > 64 or not NAME_KEBAB.fullmatch(name)):
-                self.error(skill_md, f"name {name!r}: Agent Skills names are 1-64 of a-z, 0-9, and single hyphens")
+            elif portable and not valid_skill_name(name):
+                self.error(skill_md, f"name {name!r}: Agent Skills names are 1-64 lowercase letters, digits, "
+                                     "and single hyphens")
             if not desc:
                 report(skill_md, "frontmatter 'description' is required by Agent Skills and must be a string")
+            elif len(desc) > 1024:
+                report(skill_md, "frontmatter 'description' exceeds 1024 characters")
 
     # -- catalogs ----------------------------------------------------------
     def check_catalogs(self) -> None:
@@ -582,9 +628,10 @@ class Checker:
                 data = self.load(path, self.root)
                 if data is not None:
                     self.catalogs[kind] = self.check_catalog(kind, path, data)
-        if "copilot" in self.catalogs and "copilot-root" in self.catalogs:
-            self.warn(self.root / "marketplace.json", "Copilot loads one catalog; keep either marketplace.json or "
-                                                     ".github/plugin/marketplace.json, not both")
+        copilot = [k for k in ("copilot", "copilot-root", "copilot-plugin") if k in self.catalogs]
+        if len(copilot) > 1:
+            self.warn(self.root, "Copilot loads one catalog; keep only one of "
+                                 + ", ".join(CATALOGS[k].as_posix() for k in copilot))
         if len(self.catalogs) < 2:
             return
         union = sorted(set().union(*(set(v) for v in self.catalogs.values())))
@@ -641,7 +688,10 @@ class Checker:
                 self.check_claude_components(local, path, entry, f"{where}.")
             if local is None:
                 continue
-            supplies = kind == "claude" and bool((COMPONENT_KEYS | {"themes"}) & set(entry))
+            if kind.startswith("copilot"):
+                for key in sorted(COMPONENT_KEYS & set(entry)):
+                    self.check_path_values(local, entry[key], path, f"{where}.{key}")
+            supplies = kind != "codex" and bool((COMPONENT_KEYS | {"themes"}) & set(entry))
             info = self.check_plugin(local, entry_components=supplies)
             if info.get("name") and info["name"] != ename:
                 self.error(path, f"{where}: entry name differs from the plugin manifest name {info['name']!r}")
@@ -709,12 +759,11 @@ class Checker:
                                 "the manifest wins. Set it in one place")
 
     def loadable(self, kind: str, d: Path, supplies: bool) -> bool:
-        claude = supplies or (d / ".claude-plugin" / "plugin.json").is_file() or \
-            any((d / p).exists() for p in CLAUDE_LAYOUT)
         if kind == "claude":
-            return claude
-        return claude or any((d / p).is_file() for p in ("plugin.json", ".plugin/plugin.json",
-                                                          ".codex-plugin/plugin.json"))
+            return supplies or (d / ".claude-plugin" / "plugin.json").is_file() or \
+                any((d / p).exists() for p in CLAUDE_LAYOUT)
+        manifests = CODEX_MANIFESTS if kind == "codex" else COPILOT_MANIFESTS
+        return supplies or any((d / p).is_file() for p in manifests) or (d / "skills").is_dir()
 
     def check_codex_entry(self, path: Path, where: str, entry: dict) -> None:
         policy = entry.get("policy")
@@ -732,7 +781,7 @@ class Checker:
     def run(self) -> list[dict[str, str]]:
         is_plugin = any((self.root / p).is_file() for p in
                         ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
-                         ".plugin/plugin.json"))
+                         ".plugin/plugin.json", ".github/plugin/plugin.json"))
         has_catalog = any((self.root / p).is_file() for p in CATALOGS.values())
         has_layout = any((self.root / p).exists() for p in CLAUDE_LAYOUT)
         if is_plugin or (not has_catalog and has_layout):

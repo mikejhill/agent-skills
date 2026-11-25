@@ -30,9 +30,9 @@ The root 1.0 `$schema` wins. Do not ship a Copilot-legacy root `plugin.json` nex
 
 ## Marketplace
 
-- Catalog: `.github/plugin/marketplace.json` or a root `marketplace.json`; keep only one. Copilot CLI also reads a Claude `.claude-plugin/marketplace.json`.
+- Catalog: `.plugin/marketplace.json`, `.github/plugin/marketplace.json`, or a root `marketplace.json`; keep only one. Plugin manifests can also live at `.github/plugin/plugin.json` (legacy). Copilot CLI also reads a Claude `.claude-plugin/marketplace.json`.
 - Top level: `name`, `owner` (object with `name`), `metadata`, `plugins[]`.
-- Entries: `name`, `description`, `version`, `source` (a relative path, with or without `./`, or an object with `source: "url"`, `url`, `ref`). A marketplace feed itself cannot be pinned to a ref.
+- Entries: `name`, `description`, `version`, `source` (a relative path, with or without `./`, or an object with `source: "url"`, `url`, `ref`). Pin the marketplace revision when adding it (`copilot plugin marketplace add <owner>/<repo>#<ref>`); pin each plugin's revision in its entry `source`.
 - Default marketplaces include `github/awesome-copilot`.
 - Enterprise policy keys in managed settings: `enabledPlugins`, `extraKnownMarketplaces`, `strictKnownMarketplaces`, `allowManagedHooksOnly`.
 

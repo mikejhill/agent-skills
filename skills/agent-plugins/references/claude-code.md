@@ -24,7 +24,7 @@ Claude Code reads only its own format. It is not an Agent Plugins client (2026-1
 - Reserved: names starting `claude-`, `anthropic-`, `anthropics-`, `cc-plugin-`, and `claude`, `anthropic`, `claude-code`, among others.
 - Optional: `displayName`, `version`, `description`, `author` (object, `name` required), `homepage`, `repository`, `license`, `keywords`, `dependencies`, `userConfig`, `defaultEnabled`, and component keys `skills`, `commands`, `agents`, `hooks`, `mcpServers`, `lspServers`, `outputStyles`.
 - Unknown top-level keys are stripped with a warning.
-- Component keys: `skills`, `hooks`, `mcpServers`, `lspServers` add to the default location; `commands`, `agents`, `outputStyles` replace it.
+- Component keys: `skills`, `hooks`, `mcpServers`, `lspServers` add to the default location; `commands`, `agents`, `outputStyles` replace it. `agents` lists `.md` files, not folders.
 - Paths start with `./`, stay inside the root, and contain no `..` or backslashes.
 - `version` pins users to that copy until the string changes. Omit it to track commits.
 
@@ -38,7 +38,7 @@ Claude Code reads only its own format. It is not an Agent Plugins client (2026-1
 
 - Keep Claude-only keys in `.claude-plugin/plugin.json`. Put the shared metadata (`name`, `version`, `description`, `author`, `license`) in both manifests with identical values.
 - Claude finds the shared `skills/` by default; no `skills` key is needed.
-- MCP: declare servers in `.mcp.json` or inline in `.claude-plugin/plugin.json` with `${CLAUDE_PLUGIN_ROOT}`. Do not reuse the 1.0 `mcp.json`; its schema and variables differ.
+- MCP: declare servers in `.mcp.json` or inline in `.claude-plugin/plugin.json` with `${CLAUDE_PLUGIN_ROOT}`. Claude never reads the 1.0 `mcp.json`, and with a manifest present it ignores catalog-entry `mcpServers`. Do not point Claude at `mcp.json`; its schema and variables differ.
 - Claude-format folders at the root (`agents/`, `commands/`) are ignored by Copilot and VS Code when the root manifest carries the 1.0 `$schema`. Without it, Copilot reads the package as Claude or Copilot format and loads them.
 - Hooks are the exception: Codex discovers `hooks/hooks.json` by default. Put Claude-only hooks at a non-default path, such as `claude/hooks.json`, and reference it from the `hooks` key in `.claude-plugin/plugin.json`. Give Codex its own hooks through `extensions["com.openai"].hooks`.
 

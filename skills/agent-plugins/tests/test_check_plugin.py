@@ -37,6 +37,7 @@ def good_plugin(name: str = "release-tools") -> dict[str, object]:
             "local": {"type": "stdio", "command": "node", "args": ["${PLUGIN_ROOT}/s.js"]},
             "remote": {"type": "streamable-http", "url": "https://example.com/mcp"}}},
         ".claude-plugin/plugin.json": {"name": name, "version": "1.0.0"},
+        ".mcp.json": {"mcpServers": {}},
     }
 
 
@@ -358,6 +359,46 @@ class CheckPluginTest(unittest.TestCase):
         errors = "\n".join(self.errors())
         self.assertIn("1-64 of a-z", errors)
         self.assertIn("requires kebab-case", errors)
+
+    def test_round5_fixes(self) -> None:
+        a = self.root / "a"
+        files = good_plugin("a")
+        del files[".mcp.json"]
+        files["skills/deploy/skill.md"] = skill("deploy")
+        files["skills/résumé/SKILL.md"] = skill("résumé")
+        files["skills/listy/SKILL.md"] = "---\nname: listy\ndescription:\n  - deploy\n---\n"
+        files["mcp.json"] = {"$schema": MCP, "mcpServers": {
+            "w": {"type": "stdio", "command": "node", "cwd": "./server"}}}
+        files[".claude-plugin/plugin.json"] = {"name": "a", "agents": "./agents"}
+        files["agents/x.md"] = "# x\n"
+        write(a, files)
+        findings = "\n".join(m for _, m in self.run_checker(a))
+        for text in ("Claude Code does not read the Agent Plugins mcp.json", "cwd './server' is not a folder",
+                     "a folder is not accepted", "'description' is required"):
+            self.assertIn(text, findings)
+        self.assertTrue(any("no SKILL.md directly inside" in m for m in self.warnings(a)))
+        self.assertFalse(any("résumé" in m for m in self.errors(a)))
+
+    def test_root_skill_and_copilot_rules(self) -> None:
+        write(self.root / "single", {"SKILL.md": skill("single")})
+        write(self.root / "codexonly", {".codex-plugin/plugin.json": {"name": "codexonly"}})
+        write(self.root, {".plugin/marketplace.json": {"name": "m", "owner": {"name": "o"}, "plugins": [
+            {"name": "codexonly", "source": "./codexonly"},
+            {"name": "single", "source": "./single", "mcpServers": "./missing.json"}]},
+            ".claude-plugin/marketplace.json": {"name": "example-tools", "owner": {"name": "o"}, "plugins": [
+                {"name": "single", "source": "./single"},
+                {"name": "remote", "source": {"source": "github", "repo": "o/r"}, "agents": "reviewer.md"}]}})
+        errors = "\n".join(self.errors())
+        self.assertIn("plugins[codexonly]: this harness finds no plugin", errors)
+        self.assertIn("'./missing.json': not found", errors)
+        self.assertIn("plugins[remote].agents 'reviewer.md': must start with './'", errors)
+        self.assertNotIn("plugins[single]: Claude Code finds no plugin", errors)
+
+    def test_wrong_kind_locations(self) -> None:
+        write(self.root, {"plugin.json": {"$schema": SCHEMA, "name": "x"}, "skills": "oops", "mcp.json/x": "y"})
+        errors = "\n".join(self.errors())
+        self.assertIn("mcp.json must be a file", errors)
+        self.assertIn("skills must be a folder", errors)
 
     def test_empty_folder_and_cli(self) -> None:
         self.assertTrue(any("no plugin manifest" in m for m in self.errors()))
