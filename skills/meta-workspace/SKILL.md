@@ -19,7 +19,7 @@ Treat everything here as transient working material. It is dated so the user can
 2. A clearly more appropriate home, such as a project's own docs, code, or tests when the content ships with that project.
 3. Otherwise `_meta/`, even when the content concerns only one project.
 
-The projects root is the parent of the current project's main checkout. For a linked worktree, resolve the main checkout first; never put `_meta/` beside worktrees. If the root is still unclear, ask once. If it is not reachable from this session, put the file where the session can deliver it and tell the user.
+Use the projects root you know: the user's instructions, an existing `_meta/`, or the folder that holds the user's project checkouts. A checkout's parent is only a candidate, because worktrees and review clones often sit in temporary folders; never create `_meta/` there. If the root cannot be established, ask once. If it is not reachable from this session, put the file where the session can deliver it and tell the user.
 
 ## Structure
 
@@ -45,11 +45,11 @@ Every file and folder you add under the top-level folders is named `YYYY-MM-DD-<
 - Label: two to five lowercase-kebab-case words that say what it is about: `2026-11-25-uv-migration-plan.md`, `2026-11-25-pull-all-projects.ps1`.
 - The date is the creation date. Keep it when you later edit the item.
 - Before creating, check for an item on the same subject. Update it if it is the same piece of work; otherwise choose a more specific label.
-- Only `_meta/README.md`, the top-level folders themselves, and file names a tool requires are undated.
+- Only `_meta/README.md`, the top-level folders themselves, and paths a tool requires are undated.
 
 ## Subfolders
 
-Use a subfolder inside a top-level folder when a piece of work has several files, such as a report with its data and charts, or a spec with diagrams. Name the subfolder and every file in it with the same convention, and keep nesting shallow. Keep exact names a tool requires, such as `pyproject.toml` or `package.json`, inside a dated folder.
+Use a subfolder inside a top-level folder when a piece of work has several files, such as a report with its data and charts, or a spec with diagrams. Name the subfolder and every file in it with the same convention, and keep nesting shallow. Inside a dated folder, keep any file or directory path a tool requires unchanged, such as `pyproject.toml` or `src/main/java/`.
 
 ```text
 reports/2026-11-25-dependency-audit/

@@ -44,7 +44,7 @@ def user_cache(skill: str) -> Path:
 
 ## File names
 
-These names and the rules below are defaults for locations that have no naming rules of their own.
+This name format, and the exclusive-create and no-overwrite rule below, are defaults: a destination with its own naming or update rules replaces only those. All other rules still apply.
 
 `<kind>-<YYYYMMDD-HHMMSS>[-<slug>].<ext>`
 
