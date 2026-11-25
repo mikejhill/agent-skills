@@ -5,6 +5,8 @@ Behavior is driven by the prompt text (stdin):
   SLEEP=<s>   sleep before answering
   FAIL        exit 1 with an error on stderr
   GRANDCHILD  start a long-lived grandchild and record its pid in $FAKE_PIDS
+  GENIMG      (codex) save a generated image under $CODEX_HOME/generated_images/<session>/
+  "Save every file you create ... in: DIR"  write chart.svg into DIR
 """
 import json
 import os
@@ -44,6 +46,15 @@ if "FAIL" in prompt:
     sys.exit(1)
 
 session = str(uuid.uuid4())
+m = re.search(r"Save every file you create as a deliverable for this request in: (.+)", prompt)
+if m:
+    with open(os.path.join(m.group(1).strip(), "chart.svg"), "w") as f:
+        f.write("<svg/>")
+if "GENIMG" in prompt and flavor == "codex":
+    gen = os.path.join(os.environ["CODEX_HOME"], "generated_images", session)
+    os.makedirs(gen)
+    with open(os.path.join(gen, "exec-1.png"), "wb") as f:
+        f.write(b"\x89PNG fake")
 answer = f"fake {flavor} answer; args={' '.join(a for a in argv if not a.startswith('/'))}; cwd={os.getcwd()}"
 if flavor == "codex":
     out = argv[argv.index("-o") + 1]

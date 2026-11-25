@@ -2,9 +2,9 @@
 name: cross-harness
 description: >-
   Run a code review, prompt, or task in the other coding-agent CLI (Codex from
-  Claude Code, or Claude Code from Codex) and collect the result, with bounded,
-  self-cleaning processes. Use only when the user or their instructions
-  explicitly ask to involve the other agent.
+  Claude Code, or Claude Code from Codex) and collect the result, files, and
+  generated images, with self-cleaning processes. Use only when the user or their
+  instructions explicitly ask to involve the other agent.
 compatibility: Claude Code or Codex, with the other agent's CLI installed and signed in. Python 3.8+.
 ---
 
@@ -63,6 +63,7 @@ Paths are relative to this skill's directory.
 | `review -t T [--base REF \| --commit SHA \| --uncommitted \| --pr N] [--native-args "..."] [--fix] [--post]` | Run the target's own reviewer; optionally fix and post |
 | `review ... --adversarial` / `--focus TEXT` | The skill's review prompt instead of the native reviewer |
 | `task -t T [--write] [--resume JOB] "prompt"` (or `--prompt-file F`, or stdin) | Hand over a prompt or task |
+| `task ... [--attach FILE]... [--out DIR]` | Give it files or images; collect the files it makes |
 | `wait JOB [--timeout S]` / `result JOB` | Get the outcome |
 | `status [--all] [JOB]` | Jobs with owner, PIDs, liveness, and target directory |
 | `cancel JOB` / `cancel --all` | End a job and its whole process tree |
@@ -106,6 +107,17 @@ other agent to make changes, and prefer a separate worktree for it. `--resume JO
 continues an earlier task's session. Write a self-contained brief: the other agent
 sees none of your conversation. Details: [delegation](references/delegation.md).
 
+## Files and images
+
+- `--attach FILE` (repeatable) hands over files. Codex gets images as image input;
+  other files, and every file for Claude Code, are listed in the prompt to open.
+- Codex can generate images: ask in plain words. The skill copies them from Codex's
+  image folder into the task's outputs folder, even in a read-only task.
+- `--out DIR` sets that folder (default: the job's `artifacts/`) and tells the agent to
+  save its deliverables there, with write access limited to it where the target allows.
+- `wait` and `result` list the collected files under `artifacts:`. Look at them before
+  describing them. Details: [media](references/media.md).
+
 ## Rules
 
 - Never pass `--trust`, `--dangerously-*`, or `--sandbox danger-full-access` through
@@ -120,6 +132,7 @@ sees none of your conversation. Details: [delegation](references/delegation.md).
 
 - [reviews.md](references/reviews.md): review modes, prompts, and handling findings
 - [delegation.md](references/delegation.md): briefs, write access, worktrees, and resume
+- [media.md](references/media.md): attachments, generated images, and output files
 - [caller-notes.md](references/caller-notes.md): calling from Claude Code, calling from
   Codex (sandbox escalation), and Windows
 - [troubleshooting.md](references/troubleshooting.md): failures, stuck jobs, and

@@ -324,6 +324,75 @@ def _():
             os.environ["USERPROFILE"] = saved_profile
 
 
+@case("codex task: images go to -i before '--', other files are listed, missing files are refused")
+def _():
+    img, notes = TMP / "in.png", TMP / "notes.txt"
+    img.write_bytes(b"png")
+    notes.write_text("n")
+    run("task", "-t", "codex", "--attach", str(TMP / "nope.png"), "--no-owner", "x", check=2)
+    jid = start("task", "-t", "codex", "--attach", str(img), "--attach", str(notes), "describe")
+    run("wait", jid, "--timeout", "30", check=0)
+    a = job(jid)["argv"]
+    assert a[-4:] == ["-i", str(img.resolve()), "--", "-"], a
+    assert str(notes.resolve()) not in a, a
+    p = prompts("codex")[-1]["prompt"]
+    assert str(notes.resolve()) in p and "already attached" in p and p.rstrip().endswith("describe"), p
+    jid2 = start("task", "-t", "codex", "--resume", jid, "--attach", str(img), "again")
+    run("wait", jid2, "--timeout", "30", check=0)
+    a = job(jid2)["argv"]
+    assert "resume" in a and a[-4:] == ["-i", str(img.resolve()), "--", "-"], a
+
+
+@case("codex generated images are collected into the job's artifacts; originals and older images stay")
+def _():
+    home = TMP / "codexhome"
+    env = dict(ENV, CODEX_HOME=str(home))
+    jid = start("task", "-t", "codex", "GENIMG draw a circle", env=env)
+    r = run("wait", jid, "--timeout", "30", check=0, env=env)
+    j = job(jid)
+    arts = j["artifacts"]
+    assert len(arts) == 1 and Path(arts[0]).parent == TMP / "home" / "jobs" / jid / "artifacts", arts
+    assert Path(arts[0]).read_bytes() == b"\x89PNG fake" and arts[0] in r.stdout, r.stdout
+    assert (home / "generated_images" / j["session"] / "exec-1.png").is_file()
+    assert "deliverable" not in prompts("codex")[-1]["prompt"]  # no --out: prompt unchanged
+    # A resumed session's folder holds images from earlier turns: those are not collected again.
+    old = home / "generated_images" / j["session"] / "exec-1.png"
+    os.utime(old, (time.time() - 600, time.time() - 600))
+    xh_job = dict(j, out_dir=str(TMP / "outs-old"))
+    saved = os.environ.get("CODEX_HOME")
+    os.environ["CODEX_HOME"] = str(home)
+    try:
+        assert xh.collect_artifacts(xh_job, j["session"], time.time() - 60) == []
+        assert xh.collect_artifacts(xh_job, "../x", 0) == []  # session ids never become paths
+    finally:
+        if saved is None:
+            os.environ.pop("CODEX_HOME", None)
+        else:
+            os.environ["CODEX_HOME"] = saved
+
+
+@case("--out: claude read-only may write only there; codex --write gets it as a writable root")
+def _():
+    env = dict(ENV, FAKE_FLAVOR="claude")
+    out = TMP / "outs"
+    jid = start("task", "-t", "claude", "--out", str(out), "make a chart", env=env)
+    run("wait", jid, "--timeout", "30", check=0, env=env)
+    j = job(jid)
+    a = j["argv"]
+    rule = f"Edit({xh.claude_path_rule(str(out.resolve()))}/**)"
+    assert a[a.index("--add-dir") + 1] == str(out.resolve()) and rule in a[a.index("--allowedTools") + 1], a
+    assert "Write" not in a[a.index("--disallowedTools") + 1].split(","), a
+    assert j["artifacts"] == [str(out.resolve() / "chart.svg")], j
+    jid = start("task", "-t", "codex", "--write", "--out", str(out), "make a chart")
+    run("wait", jid, "--timeout", "30", check=0)
+    a = job(jid)["argv"]
+    assert "sandbox_workspace_write.writable_roots=" + json.dumps([str(out.resolve())]) in a, a
+    jid = start("task", "-t", "codex", "--out", str(out), "make a chart")  # read-only: no write grant
+    run("wait", jid, "--timeout", "30", check=0)
+    assert not any("writable_roots" in x for x in job(jid)["argv"])
+    assert "cannot write files" in prompts("codex")[-1]["prompt"]
+
+
 @case("no job holds the repo after completion")
 def _():
     run("status", check=0)
