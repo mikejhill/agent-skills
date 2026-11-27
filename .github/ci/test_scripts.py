@@ -189,8 +189,16 @@ NON_CODE_NAMES = {".gitignore", ".gitattributes", ".gitkeep", ".editorconfig", "
 DATA_FOLDERS = {"assets", "examples"}
 
 
-def in_data_folder(rel: str) -> bool:
+def skill_rel(rel: str) -> str:
+    """Map a harness-specific skill path (harnesses/<h>/skills/...) to the root layout."""
     parts = rel.split("/")
+    if len(parts) > 3 and parts[0] == "harnesses" and parts[2] == "skills":
+        return "/".join(parts[2:])
+    return rel
+
+
+def in_data_folder(rel: str) -> bool:
+    parts = skill_rel(rel).split("/")
     return len(parts) > 3 and parts[0] == "skills" and parts[2] in DATA_FOLDERS
 
 
@@ -231,7 +239,7 @@ def uncovered_reason(path: Path, rel: str) -> str | None:
     suffix = path.suffix.lower()
     if path.name in NON_CODE_NAMES or suffix in NON_CODE_SUFFIXES:
         return None
-    if rel.startswith("skills/"):
+    if skill_rel(rel).startswith("skills/"):
         return f"{path.suffix or 'no extension'}: not a covered language or a known data type"
     if suffix in SOURCE_SUFFIXES:
         return f"{path.suffix} source file; no lint job selects this suffix"
@@ -290,6 +298,15 @@ def test_script_language_guard_classification(tmp_path: Path) -> None:
     assert in_data_folder("skills/x/examples/demo.ts")
     assert not in_data_folder("skills/assets/scripts/render.ts")
     assert not in_data_folder("skills/x/scripts/assets/render.ts")
+    # Harness-specific skills follow the same rules.
+    assert in_data_folder("harnesses/claude/skills/x/assets/vendor.js")
+    assert not in_data_folder("harnesses/claude/skills/x/scripts/render.ts")
+    assert not in_data_folder("harnesses/claude/assets/x/vendor.js")
+    hs = tmp_path / "harnesses" / "claude" / "skills" / "x" / "bin"
+    hs.mkdir(parents=True)
+    hrender = hs / "render.fsx"
+    hrender.write_text("printfn \"1\"\n", encoding="utf-8")
+    assert uncovered_reason(hrender, hrender.relative_to(tmp_path).as_posix()) is not None
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="needs bash")

@@ -35,14 +35,6 @@ Pin a branch, tag, or commit with `"ref"`, and check the remote less often with 
 
 To sync a local clone instead (for example while editing it), use `"path": "~/path/to/agent-skills"`.
 
-Then preview and apply:
-
-```bash
-skillsinc plan
-skillsinc sync
-skillsinc status   # remote check and error state for each source
-```
-
 ### Harness-specific items
 
 Everything at the root is harness-neutral and goes to every harness. An item that only works in, or only applies to, one harness lives under `harnesses/<harness>/` instead, using the same kind folders as the root. `<harness>` is the SkillSinc profile name: `claude`, `codex`, `copilot`, or `vscode`.
@@ -71,11 +63,25 @@ SkillSinc reads only the kind folders at a source's root, so the main source nev
 
 With a local clone, use `"path": "~/path/to/agent-skills/harnesses/claude"`. Add a harness source only once its folder exists: a missing folder fails the source.
 
+**Migrating a config that used per-item excludes:** add the harness sources and routes before the next sync, then drop the old excludes. Otherwise the next sync removes the moved items from their harness. Confirm in `skillsinc plan` that each harness item is still delivered (no `delete` for it) before running `skillsinc sync`.
+
 Limits:
 
-- Skills for Codex, Copilot CLI, and VS Code all load from `~/.agents/skills`, so a skill cannot be isolated to one of them. VS Code also reads `~/.claude/skills` unless its `chat.agentSkillsLocations` setting turns that off. Prefer a harness-neutral skill and state any harness limit in its README.
+- Routing picks the destination folder, not every harness that reads it. Shared discovery paths:
+  - Codex, Copilot CLI, and VS Code all load skills from `~/.agents/skills`, so a skill cannot be isolated to one of them.
+  - VS Code also reads `~/.claude/skills` (unless its `chat.agentSkillsLocations` setting turns that off) and `~/.copilot/instructions` and `~/.copilot/agents`, so items under `harnesses/claude/skills/` or `harnesses/copilot/{instructions,agents}/` also reach VS Code.
+  - Prefer a harness-neutral item and state any harness limit in its README or description.
+- Use only the kinds the harness's SkillSinc profile writes (`skillsinc harnesses`): `claude` takes every kind; `codex` takes `instructions`, `agents`, `mcp`; `copilot` takes `skills`, `instructions`, `agents`, `mcp`, `resources`, `hooks`; `vscode` takes `instructions`, `agents`, `prompts`, `mcp`. CI rejects other combinations.
 - An item for several harnesses but not all stays at the root and is excluded per route.
 - Harness sidecar files inside a neutral skill, such as `agents/openai.yaml`, stay with the skill; they are ignored by other harnesses.
+
+Then preview and apply:
+
+```bash
+skillsinc plan
+skillsinc sync
+skillsinc status   # remote check and error state for each source
+```
 
 Without SkillSinc, copy a skill folder into your harness's skills directory (for example `~/.claude/skills/` or `~/.agents/skills/`).
 
@@ -85,10 +91,10 @@ Without SkillSinc, copy a skill folder into your harness's skills directory (for
 
 | Job | What it checks |
 | --- | --- |
-| Skill format | Every skill against the [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) reference validator and the `agent-context` checker |
+| Skill format | Every skill (`skills/` and `harnesses/*/skills/`) against the [skills-ref](https://github.com/agentskills/agentskills/tree/main/skills-ref) reference validator and the `agent-context` checker |
 | Code lint | Python (ruff), shell (shellcheck), PowerShell (PSScriptAnalyzer), YAML (yamllint), and workflows (actionlint) |
 | Markdown lint | markdownlint-cli2 with [.markdownlint-cli2.jsonc](.markdownlint-cli2.jsonc) |
-| Tests | Skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
+| Tests | Layout checks for `harnesses/`, skill unit tests and script smoke tests on Linux (Python 3.9 and latest), Windows, and macOS |
 | Language coverage | Fails when a skill adds a script in a language no job lints or tests (for example Go or TypeScript); add a job for it first |
 | PR title | Conventional Commits |
 
@@ -96,8 +102,7 @@ Run them locally from the repository root (needs Python 3.11+, Node.js, and Powe
 
 ```bash
 pip install -r .github/ci/requirements.txt -r .github/ci/requirements-test.txt
-python .github/ci/skills_ref_check.py
-python skills/agent-context/scripts/check_skill.py skills
+python .github/ci/check_skills.py   # skills-ref + agent-context checker on skills/ and harnesses/*/skills/
 .github/ci/lint.sh   # ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint (same as CI)
 npx markdownlint-cli2
 python -m pytest
