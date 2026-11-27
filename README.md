@@ -46,6 +46,8 @@ Everything at the root is harness-neutral and goes to every harness. An item tha
 
 SkillSinc reads only the kind folders at a source's root, so the main source never sees `harnesses/`. Add one source per harness folder and route it to that harness's destination alone. Adding or removing a harness-specific item then needs no configuration change:
 
+Merge this fragment into your config, using your own destination names:
+
 ```jsonc
 {
   "sources": {
@@ -63,13 +65,13 @@ SkillSinc reads only the kind folders at a source's root, so the main source nev
 
 With a local clone, use `"path": "~/path/to/agent-skills/harnesses/claude"`. Add a harness source only once its folder exists: a missing folder fails the source.
 
-**Migrating a config that used per-item excludes:** add the harness sources and routes before the next sync, then drop the old excludes. Otherwise the next sync removes the moved items from their harness. Confirm in `skillsinc plan` that each harness item is still delivered (no `delete` for it) before running `skillsinc sync`.
+**Migrating a config that used per-item excludes:** add the harness sources and routes before the next sync, then drop the old excludes. If `public` is pinned with `ref`, give the harness sources the same `ref`, and move all three to a commit that has `harnesses/` before dropping the excludes; with an older pin, keep the old routes. Otherwise the next sync removes the moved items from their harness. Confirm in `skillsinc plan` that each harness item is still delivered (no `delete` for it) before running `skillsinc sync`.
 
 Limits:
 
 - Routing picks the destination folder, not every harness that reads it. Shared discovery paths:
   - Codex, Copilot CLI, and VS Code all load skills from `~/.agents/skills`, so a skill cannot be isolated to one of them.
-  - VS Code also reads `~/.claude/skills` (unless its `chat.agentSkillsLocations` setting turns that off) and `~/.copilot/instructions` and `~/.copilot/agents`, so items under `harnesses/claude/skills/` or `harnesses/copilot/{instructions,agents}/` also reach VS Code.
+  - VS Code also reads `~/.claude/skills` (unless its `chat.agentSkillsLocations` setting turns that off), `~/.copilot/skills`, `~/.copilot/instructions`, `~/.copilot/agents`, and the Claude Code and Copilot CLI user hooks. Skills and hooks under `harnesses/claude/`, and skills, instructions, agents, and hooks under `harnesses/copilot/`, also reach VS Code.
   - Prefer a harness-neutral item and state any harness limit in its README or description.
 - Use only the kinds the harness's SkillSinc profile writes (`skillsinc harnesses`): `claude` takes every kind; `codex` takes `instructions`, `agents`, `mcp`; `copilot` takes `skills`, `instructions`, `agents`, `mcp`, `resources`, `hooks`; `vscode` takes `instructions`, `agents`, `prompts`, `mcp`. CI rejects other combinations.
 - An item for several harnesses but not all stays at the root and is excluded per route.

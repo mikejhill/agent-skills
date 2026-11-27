@@ -15,6 +15,7 @@ folder is a separate SkillSinc source routed to that harness alone, so:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,6 +37,8 @@ SUFFIX = {
     "hooks": ".json",
 }
 KINDS = {"skills", *SUFFIX}
+# AGENTS.md: names are lowercase and hyphen-separated.
+NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def item_name(kind: str, path: Path) -> str | None:
@@ -48,6 +51,11 @@ def item_name(kind: str, path: Path) -> str | None:
     if path.is_file() and path.name.endswith(suffix) and len(path.name) > len(suffix):
         return path.name[: -len(suffix)]
     return None
+
+
+def bad_names(kind_dir: Path) -> list[str]:
+    names = (item_name(kind_dir.name, p) for p in kind_dir.iterdir())
+    return sorted(n for n in names if n and not NAME.fullmatch(n))
 
 
 def stray(kind_dir: Path) -> list[str]:
@@ -91,6 +99,17 @@ def test_harness_folders_hold_supported_kinds_only() -> None:
             assert child.name in allowed, f"{rel}: SkillSinc's {d.name} profile does not write {child.name}"
             assert items(child), f"{rel} holds no item SkillSinc reads"
             assert not stray(child), f"{rel}: not items SkillSinc reads: {stray(child)}"
+            assert not bad_names(child), f"{rel}: names must be lowercase and hyphen-separated: {bad_names(child)}"
+
+
+def test_documented_harness_sources_exist() -> None:
+    # The README's config names one source per harness folder; a missing folder fails that source.
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r'"subdirectory": "harnesses/([a-z]+)"', readme))
+    assert documented, "README documents no harness source"
+    present = {d.name for d in harness_dirs()}
+    assert documented <= present, f"README documents harness sources with no folder: {sorted(documented - present)}"
+    assert present <= documented, f"harness folders missing from the README config: {sorted(present - documented)}"
 
 
 def test_harness_items_do_not_shadow_root_items() -> None:
@@ -113,3 +132,8 @@ def test_item_name_classification(tmp_path: Path) -> None:
     assert item_name("prompts", tmp_path / "review.instructions.md") is None
     assert item_name("skills", tmp_path / "s") == "s"
     assert item_name("skills", tmp_path / "empty") is None
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    for name in ("bad name.prompt.md", "Bad.prompt.md", "good-one.prompt.md"):
+        (prompts / name).write_text("x", encoding="utf-8")
+    assert bad_names(prompts) == ["Bad", "bad name"]
