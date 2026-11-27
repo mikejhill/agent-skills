@@ -399,17 +399,38 @@ class Checker:
 
 
 def coupling_names(skill_root: Path) -> list[tuple[str, str]]:
-    """Sibling skills and library instruction files a skill could name, as (kind, name)."""
-    names: list[tuple[str, str]] = []
+    """Other skills and library instruction files a skill could name, as (kind, name).
+
+    Covers the skill's siblings and the adjacent instructions/ folder. In a library
+    that keeps one-harness items under harnesses/<harness>/, every skills/ and
+    instructions/ folder of the library counts, so a dependency across that
+    boundary is caught too.
+    """
     parent = skill_root.parent
+    lib = parent.parent
+    if lib.parent.name == "harnesses":
+        lib = lib.parent.parent
+    skill_dirs = [parent, lib / "skills"]
+    instruction_dirs = [parent.parent / "instructions", lib / "instructions"]
     try:
-        names += [("skill", d.name) for d in parent.iterdir() if d != skill_root and (d / "SKILL.md").is_file()]
-        instructions = parent.parent / "instructions"
-        if instructions.is_dir():
-            names += [("instruction", f.name.split(".")[0]) for f in instructions.glob("*.instructions.md")]
+        for h in sorted((lib / "harnesses").glob("*")):
+            skill_dirs.append(h / "skills")
+            instruction_dirs.append(h / "instructions")
     except OSError:
         pass
-    return names
+    names: set[tuple[str, str]] = set()
+    for folder in dict.fromkeys(skill_dirs):
+        try:
+            names |= {("skill", d.name) for d in folder.iterdir()
+                      if d.resolve() != skill_root.resolve() and (d / "SKILL.md").is_file()}
+        except OSError:
+            pass
+    for folder in dict.fromkeys(instruction_dirs):
+        try:
+            names |= {("instruction", f.name.split(".")[0]) for f in folder.glob("*.instructions.md")}
+        except OSError:
+            pass
+    return sorted(names)
 
 
 def find_skills(paths: list[Path]) -> tuple[list[Path], list[Path]]:

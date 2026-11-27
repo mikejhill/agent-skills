@@ -144,6 +144,19 @@ class CheckSkillTest(unittest.TestCase):
         (d / "SKILL.md").write_text("---\nname: s\ndescription: D.\n---\nFollowing `other-skill` for frameworks.\n", encoding="utf-8")
         self.assertTrue(any("'other-skill'" in m for _, m in levels(d)))
 
+    def test_coupling_across_harness_folders(self) -> None:
+        lib = self.root / "lib"
+        (lib / "skills").mkdir(parents=True)
+        make_skill(lib / "skills", "root-skill", "name: root-skill\ndescription: D.\n")
+        hroot = lib / "harnesses" / "claude" / "skills"
+        hroot.mkdir(parents=True)
+        (lib / "harnesses" / "codex" / "instructions").mkdir(parents=True)
+        (lib / "harnesses" / "codex" / "instructions" / "codex-attribution.instructions.md").write_text("x", encoding="utf-8")
+        d = make_skill(hroot, "h", "name: h\ndescription: D.\n", body="Load the `root-skill` skill.\n")
+        self.assertTrue(any("'root-skill'" in m for _, m in levels(d)))
+        r = make_skill(lib / "skills", "r", "name: r\ndescription: D.\n", body="Follow codex-attribution.instructions.md.\n")
+        self.assertTrue(any("'codex-attribution'" in m for _, m in levels(r)))
+
     def test_coupling_paths_and_filenames(self) -> None:
         make_skill(self.root, "session-handoff", "name: session-handoff\ndescription: D.\n")
         make_skill(self.root, "project-setup", "name: project-setup\ndescription: D.\n")

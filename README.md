@@ -65,7 +65,12 @@ Merge this fragment into your config, using your own destination names:
 
 With a local clone, use `"path": "~/path/to/agent-skills/harnesses/claude"`. Add a harness source only once its folder exists: a missing folder fails the source.
 
-**Migrating a config that used per-item excludes:** add the harness sources and routes before the next sync, then drop the old excludes. If `public` is pinned with `ref`, give the harness sources the same `ref`, and move all three to a commit that has `harnesses/` before dropping the excludes; with an older pin, keep the old routes. Otherwise the next sync removes the moved items from their harness. Confirm in `skillsinc plan` that each harness item is still delivered (no `delete` for it) before running `skillsinc sync`.
+**Migrating a config that used per-item excludes:**
+
+1. Keep the existing routes for `public`. Add the harness sources and routes beside them, and copy onto them any `disabled` selectors, route excludes, and `profiles` that applied to the moved items.
+2. If `public` is pinned with `ref`, give the harness sources the same `ref`, and move all three to a commit that has `harnesses/`. With an older pin, keep the old setup.
+3. Remove only the excludes the move made redundant.
+4. Before syncing the real destinations, check that each harness item is selected: point a copy of the config at disposable `generic` destinations (one per real destination, same routes), sync it, and look for each item. For Codex, confirm the attribution rule is in the rendered `AGENTS.md` block; a missing instruction there shows as a changed block, not a `delete`.
 
 Limits:
 
@@ -73,7 +78,7 @@ Limits:
   - Codex, Copilot CLI, and VS Code all load skills from `~/.agents/skills`, so a skill cannot be isolated to one of them.
   - VS Code also reads `~/.claude/skills` (unless its `chat.agentSkillsLocations` setting turns that off), `~/.copilot/skills`, `~/.copilot/instructions`, `~/.copilot/agents`, and the Claude Code and Copilot CLI user hooks. Skills and hooks under `harnesses/claude/`, and skills, instructions, agents, and hooks under `harnesses/copilot/`, also reach VS Code.
   - Prefer a harness-neutral item and state any harness limit in its README or description.
-- Use only the kinds the harness's SkillSinc profile writes (`skillsinc harnesses`): `claude` takes every kind; `codex` takes `instructions`, `agents`, `mcp`; `copilot` takes `skills`, `instructions`, `agents`, `mcp`, `resources`, `hooks`; `vscode` takes `instructions`, `agents`, `prompts`, `mcp`. CI rejects other combinations.
+- Use only the kinds the harness's SkillSinc profile writes (`skillsinc harnesses` on 0.9.0 and later, `skillsinc profiles` on earlier versions): `claude` takes every kind; `codex` takes `instructions`, `agents`, `mcp`; `copilot` takes `skills`, `instructions`, `agents`, `mcp`, `resources`, `hooks`; `vscode` takes `instructions`, `agents`, `prompts`, `mcp`. CI rejects other combinations.
 - An item for several harnesses but not all stays at the root and is excluded per route.
 - Harness sidecar files inside a neutral skill, such as `agents/openai.yaml`, stay with the skill; they are ignored by other harnesses.
 
