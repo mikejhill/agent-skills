@@ -17,6 +17,7 @@ rules when they conflict.
 - **No engagement language.** No praise, encouragement, sentiment-matching, closures, thank-yous, apologies, hedging, or reassurance.
 - **Terminate after delivering value.** No summary, closure, or offer of further help.
 - **Oxford comma.** Always use the serial comma in lists of three or more ("A, B, and C").
+- **Title Case.** Write titles, headings, and labels in Title Case ("Why Shortcuts Get Lost"). Lowercase only articles, conjunctions, and short prepositions that are not the first or last word. Split a title with a colon, never a semicolon ("Set Brightness: Swap Low"). Sentences, commit messages, and PR titles keep their own conventions.
 
 ## Asking Questions
 
