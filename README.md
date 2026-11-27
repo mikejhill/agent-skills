@@ -15,6 +15,7 @@ The library is a [SkillSinc](https://github.com/mikejhill/skillsinc) source: Ski
 | `instructions/` | Always-on or scoped instruction files (`<name>.instructions.md`) |
 | `agents/`       | Custom agent definitions (`<name>.agent.md`)                 |
 | `prompts/`      | Explicit, repeatable prompt files (`<name>.prompt.md`)       |
+| `harnesses/<harness>/` | Items for one harness only, in the same kind folders (`skills/`, `instructions/`, `agents/`, `prompts/`); see [Harness-specific items](#harness-specific-items) |
 
 ## Usage
 
@@ -41,6 +42,40 @@ skillsinc plan
 skillsinc sync
 skillsinc status   # remote check and error state for each source
 ```
+
+### Harness-specific items
+
+Everything at the root is harness-neutral and goes to every harness. An item that only works in, or only applies to, one harness lives under `harnesses/<harness>/` instead, using the same kind folders as the root. `<harness>` is the SkillSinc profile name: `claude`, `codex`, `copilot`, or `vscode`.
+
+| Folder | Holds today |
+| --- | --- |
+| `harnesses/claude/` | `instructions/claude-file-links`, `instructions/codex-via-cross-harness`, `prompts/codex-*` (the Codex review gate and commands run from Claude Code) |
+| `harnesses/codex/` | `instructions/codex-attribution` |
+
+SkillSinc reads only the kind folders at a source's root, so the main source never sees `harnesses/`. Add one source per harness folder and route it to that harness's destination alone. Adding or removing a harness-specific item then needs no configuration change:
+
+```jsonc
+{
+  "sources": {
+    "public": { "github": "mikejhill/agent-skills" },
+    "public-claude": { "github": "mikejhill/agent-skills", "subdirectory": "harnesses/claude" },
+    "public-codex": { "github": "mikejhill/agent-skills", "subdirectory": "harnesses/codex" },
+  },
+  "routes": [
+    { "sources": ["public"], "destinations": ["claude", "codex", "copilot", "vscode", "agents"], "allow_lossy": true },
+    { "sources": ["public-claude"], "destinations": ["claude"], "allow_lossy": true },
+    { "sources": ["public-codex"], "destinations": ["codex"], "allow_lossy": true },
+  ],
+}
+```
+
+With a local clone, use `"path": "~/path/to/agent-skills/harnesses/claude"`. Add a harness source only once its folder exists: a missing folder fails the source.
+
+Limits:
+
+- Skills for Codex, Copilot CLI, and VS Code all load from `~/.agents/skills`, so a skill cannot be isolated to one of them. VS Code also reads `~/.claude/skills` unless its `chat.agentSkillsLocations` setting turns that off. Prefer a harness-neutral skill and state any harness limit in its README.
+- An item for several harnesses but not all stays at the root and is excluded per route.
+- Harness sidecar files inside a neutral skill, such as `agents/openai.yaml`, stay with the skill; they are ignored by other harnesses.
 
 Without SkillSinc, copy a skill folder into your harness's skills directory (for example `~/.claude/skills/` or `~/.agents/skills/`).
 

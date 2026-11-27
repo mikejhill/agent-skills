@@ -39,6 +39,13 @@ jobs:
         run: python .github/ci/skills_ref_check.py
       - name: agent-context checker
         run: python skills/agent-context/scripts/check_skill.py skills
+      - name: Harness-specific skills (harnesses/*/skills)
+        run: |
+          for d in harnesses/*/skills; do
+            [ -d "$d" ] || continue
+            python .github/ci/skills_ref_check.py "$d"
+            python skills/agent-context/scripts/check_skill.py "$d"
+          done
 
   lint:
     name: Code lint (ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint)

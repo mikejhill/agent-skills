@@ -6,6 +6,7 @@
     "globs": [
         "*.md",
         "agents/**/*.md",
+        "harnesses/**/*.md",
         "instructions/**/*.md",
         "prompts/**/*.md",
         "resources/**/*.md",
@@ -14,7 +15,8 @@
 
     // Skill assets are templates with <placeholders>, not documentation.
     "ignores": [
-        "skills/**/assets/**"
+        "skills/**/assets/**",
+        "harnesses/*/skills/**/assets/**"
     ],
 
     // Rule configuration for markdownlint.
