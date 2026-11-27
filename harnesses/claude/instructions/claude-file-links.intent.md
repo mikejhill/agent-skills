@@ -12,8 +12,8 @@ Make every file Claude references something the user can open with one click.
 
 ## Requirements
 
-- Applies to Claude only. Other harnesses don't get this file (the local SkillSinc
-  config excludes it from every non-Claude route).
+- Applies to Claude only. It lives under `harnesses/claude/`, which is routed to the
+  Claude destination alone.
 - Line numbers are included when pointing at specific code.
 
 ## Log
@@ -29,3 +29,5 @@ Make every file Claude references something the user can open with one click.
   from anthropics/claude-code#13008 instead.
 - 2026-11-24: [agent] Added this intent file. The rule now says explicitly not to
   put file references only in inline code.
+- 2026-11-27: [agent] Moved to `harnesses/claude/instructions/` under the
+  harness-folder convention, replacing the per-item route excludes.

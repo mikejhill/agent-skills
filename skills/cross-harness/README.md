@@ -12,7 +12,7 @@ Runs only when you or your instruction files ask for the other agent. Examples:
 - "Ask Claude to try this prompt and compare."
 - "Have Codex generate a hero image for the landing page."
 
-The repository's optional Codex review gate (`instructions/codex-via-cross-harness.instructions.md`) and the `codex-*` prompts use this skill too.
+The repository's optional Codex review gate (`harnesses/claude/instructions/codex-via-cross-harness.instructions.md`) and the `codex-*` prompts in `harnesses/claude/prompts/` use this skill too.
 
 ## Requirements
 

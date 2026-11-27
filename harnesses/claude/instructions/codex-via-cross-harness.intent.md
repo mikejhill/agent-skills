@@ -8,9 +8,8 @@ skill, including its automatic review gate, so the plugin can be removed.
 1. Match the plugin's stop-time review gate. It is opt-in per repository and off by
    default. Where it is on, Claude gets an adversarial Codex review of each turn's
    direct code edits before finishing that turn.
-2. Claude Code only. SkillSinc routes these items to the `claude` destination alone.
-   Every other route excludes `instructions/codex-via-cross-harness` and
-   `prompts/codex-*`.
+2. Claude Code only. The instruction and prompts live under `harnesses/claude/`,
+   which SkillSinc routes to the `claude` destination alone.
 3. The gate stays bounded: at most two review rounds per turn. The plugin loops until
    Codex allows the stop. Nothing leaks processes.
 4. Codex's output is verified before it's relayed. It's never presented as the
@@ -45,3 +44,6 @@ skill, including its automatic review gate, so the plugin can be removed.
   The gate now follows that design. It is opt-in per repository, through `git config
   --local cross-harness.reviewGate true`, and off by default. It reviews only this
   turn's edits, adversarially, and stops after two rounds.
+- 2026-11-27: [agent] Moved the instruction and the six prompts to
+  `harnesses/claude/` under the harness-folder convention, replacing the per-item
+  route excludes.

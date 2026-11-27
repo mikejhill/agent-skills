@@ -29,7 +29,7 @@ applyTo: "**/*.py,**/pyproject.toml"
 - Scope with `applyTo` before reaching for `"**"`. The glob limits when the rules apply. Harnesses that filter natively also keep them out of unrelated requests, but others bundle every instruction file into one always-on context with an "applies when" note, so a narrow glob does not shrink context there. Keep the file short either way.
 - One subject per file. Split a file that mixes, say, commit conventions and temp paths, so each can be routed or dropped alone.
 - Write rules that hold everywhere the file is installed. Machine-specific paths, account names, and private hosts belong in a private library or the user's own config.
-- A rule for only one harness goes in its own file, named for that harness, and says so in its description. Route it only to that harness with the distribution tool's config.
+- A rule for only one harness goes in its own file, named for that harness, and says so in its description. In a library, keep such files in a folder per harness (for example `harnesses/<harness>/instructions/`) so the distribution tool routes the folder to that harness, not each file.
 - Do not restate repository-specific facts here; they belong in that repository's `AGENTS.md`.
 
 ## Checklist

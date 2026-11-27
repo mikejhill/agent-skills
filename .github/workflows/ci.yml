@@ -35,10 +35,8 @@ jobs:
           cache: pip
           cache-dependency-path: .github/ci/requirements.txt
       - run: pip install -r .github/ci/requirements.txt
-      - name: skills-ref validate
-        run: python .github/ci/skills_ref_check.py
-      - name: agent-context checker
-        run: python skills/agent-context/scripts/check_skill.py skills
+      - name: skills-ref + agent-context checker (skills/ and harnesses/*/skills/)
+        run: python .github/ci/check_skills.py
 
   lint:
     name: Code lint (ruff, shellcheck, PSScriptAnalyzer, yamllint, actionlint)
